@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.system.configMap.global.name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+data:
+  NAMESPACE: {{ .Values.namespace.name | quote }}
+  DISTRIBUTION_URL: {{ .Values.distribution.url | quote }}
+  RELEASE_NAME: {{.Release.Name | quote }}
+  CHART_NAME: {{ .Chart.Name | quote }}
+  CHART_VERSION: {{ .Values.image.tag | quote }}
+  CONSOLE_LOG_LEVEL: "INFO"
+  UPLOAD_LOG_LEVEL: "ERROR"
+  {{- if .Values.optionalValues }}
+  {{- range $key, $value := .Values.optionalValues }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  {{- end }}
