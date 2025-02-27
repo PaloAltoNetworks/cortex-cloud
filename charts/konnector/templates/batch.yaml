@@ -1,0 +1,23 @@
+{{- include "common.validateImage" . }}
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+{{- include "common.jobTemplate" . | nindent 0 }}
+---
+
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Chart.Name }}
+  namespace: {{ .Values.namespace.name }}
+  labels:
+    {{- include "common.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.system.batch.schedule }}
+  jobTemplate:
+    {{- include "common.jobTemplate" . | nindent 4 }}
