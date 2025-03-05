@@ -10,10 +10,10 @@
 # These settings are predefined and should not be modified by the customer.
 
 image:
-  registry: "default-registry"    # Registry where the image is stored
-  name: "default-image"           # Name of the image to be used
-  tag: "default-tag"              # Tag for the image
-  digest: ""                      # Image digest (optional)
+  repositroy: "default-repositroy"  # Repositroy where the image is stored
+  name: "default-image"             # Name of the image to be used
+  tag: "default-tag"                # Tag for the image
+  digest: ""                        # Image digest (optional)
 
 namespace:
   name: pan  # Kubernetes namespace where resources will be deployed
