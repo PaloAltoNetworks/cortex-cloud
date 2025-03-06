@@ -3,8 +3,8 @@
     {{- fail (print "Error: 'image.name' is missing or empty. Provided value: '" .Values.image.name "'") -}}
   {{- end -}}
 
-  {{- if or (not .Values.image.repositroy) (eq .Values.image.repositroy "") -}}
-    {{- fail (print "Error: 'image.repositroy' is missing or empty. Provided value: '" .Values.image.repositroy "'") -}}
+  {{- if or (not .Values.image.repository) (eq .Values.image.repository "") -}}
+    {{- fail (print "Error: 'image.repository' is missing or empty. Provided value: '" .Values.image.repository "'") -}}
   {{- end -}}
 
   {{- if and (not .Values.image.tag) (not .Values.image.digest) -}}
@@ -39,7 +39,7 @@ spec:
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       containers:
         - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repositroy }}/{{ .Values.image.name }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
           command: [/{{ .Chart.Name }}]
           env:
             - name: DISTRIBUTION_ID
