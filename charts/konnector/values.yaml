@@ -98,12 +98,12 @@ system:
           verbs: ["get", "update", "patch", "list", "watch"]
         - apiGroups: ["admissionregistration.k8s.io"]
           resources: ["validatingwebhookconfigurations"]
-          verbs: ["update", "list", "watch", "get"]
+          verbs: ["update", "list", "watch", "get", "create"]
     read-inventory:
       rules:
         - apiGroups: [""]
           resources: ["namespaces", "pods", "serviceaccounts", "endpoints", "services", "configmaps", "secrets", "nodes", "nodes/proxy"]
-          verbs: ["get", "list", "watch"]
+          verbs: ["get", "list", "watch", "create"]
         - apiGroups: ["apps"]
           resources: ["replicasets", "deployments", "statefulsets", "daemonsets"]
           verbs: ["get", "list", "watch"]
@@ -112,7 +112,7 @@ system:
           verbs: ["get", "list", "watch"]
         - apiGroups: ["rbac.authorization.k8s.io"]
           resources: ["clusterroles", "roles", "rolebindings", "clusterrolebindings"]
-          verbs: ["get", "list", "watch"]
+          verbs: ["get", "list", "watch", "create"]
         - apiGroups: ["networking.k8s.io"]
           resources: ["networkpolicies", "ingresses"]
           verbs: ["get", "list", "watch"]
