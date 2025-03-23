@@ -64,7 +64,7 @@ system:
       rules:
         - apiGroups: [""]
           resources: ["secrets"]
-          verbs: ["create"]
+          verbs: ["create", "patch"]
     job-manager:
       rules:
         - apiGroups: ["batch"]
@@ -78,14 +78,14 @@ system:
     connector-manager-creator:
       rules:
         - apiGroups: [""]
-          resources: ["configmaps", "services"]
-          verbs: ["create"]
+          resources: ["configmaps", "services", "serviceaccounts"]
+          verbs: ["create", "patch"]
         - apiGroups: ["apps"]
           resources: ["deployments"]
-          verbs: ["create"]
+          verbs: ["create", "patch"]
         - apiGroups: ["batch"]
-          resources: ["cronjobs"]
-          verbs: ["create"]
+          resources: ["cronjobs", "jobs"]
+          verbs: ["create", "patch"]
 
   # ==========================
   # Cluster Role Resources
@@ -98,7 +98,7 @@ system:
           verbs: ["get", "update", "patch", "list", "watch"]
         - apiGroups: ["admissionregistration.k8s.io"]
           resources: ["validatingwebhookconfigurations"]
-          verbs: ["update", "list", "watch", "get", "create"]
+          verbs: ["update", "list", "watch", "get", "create", "patch"]
     read-inventory:
       rules:
         - apiGroups: [""]
@@ -112,7 +112,7 @@ system:
           verbs: ["get", "list", "watch"]
         - apiGroups: ["rbac.authorization.k8s.io"]
           resources: ["clusterroles", "roles", "rolebindings", "clusterrolebindings"]
-          verbs: ["get", "list", "watch", "create"]
+          verbs: ["get", "list", "watch", "create", "patch"]
         - apiGroups: ["networking.k8s.io"]
           resources: ["networkpolicies", "ingresses"]
           verbs: ["get", "list", "watch"]
@@ -120,7 +120,7 @@ system:
       rules:
         - apiGroups: ["apiextensions.k8s.io"]
           resources: ["customresourcedefinitions"]
-          verbs: ["create", "get"]
+          verbs: ["create", "get", "patch"]
     otel:
       rules:
         - apiGroups: [""]
