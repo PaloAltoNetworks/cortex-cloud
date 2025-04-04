@@ -3,7 +3,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ .Chart.Name }}
+  name: "{{ .Chart.Name }}-job-revision-{{ .Release.Revision }}"
   namespace: {{ .Values.namespace.name }}
   labels:
     {{- include "common.labels" . | nindent 4 }}
