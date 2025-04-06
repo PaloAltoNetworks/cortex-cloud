@@ -21,3 +21,41 @@ spec:
   schedule: {{ .Values.system.batch.schedule }}
   jobTemplate:
     {{- include "common.jobTemplate" . | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-{{ .Values.system.K8sManager.ReleaseName }}
+  namespace: {{ .Values.namespace.name }}
+  annotations:
+    "helm.sh/hook": pre-delete
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: {{ .Values.system.serviceAccount.name }}
+      restartPolicy: "Never"
+      containers:
+        - name: helm-uninstall
+          image: alpine/helm:3.17.2
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+                echo -e "\033[34mChecking for {{ .Values.system.K8sManager.ReleaseName }} in namespace {{ .Release.Namespace }}...\033[0m";
+                if helm status {{ .Values.system.K8sManager.ReleaseName }} --namespace {{ .Release.Namespace }} >/dev/null 2>&1; then
+                  echo -e "\033[33mUninstalling {{ .Values.system.K8sManager.ReleaseName }}...\033[0m";
+                  if helm uninstall {{ .Values.system.K8sManager.ReleaseName }} --namespace {{ .Release.Namespace }} --debug; then
+                    echo -e "\033[32mSuccessfully uninstalled {{ .Values.system.K8sManager.ReleaseName }}.\033[0m";
+                    exit 0
+                  else
+                    echo -e "\033[31mWe attempted to uninstall all related components, but an internal cleanup step failed. \n\
+                          As a result, some resources may not have been fully removed. \n\
+                          To complete the uninstallation manually, please run the following command: \n \
+                          helm uninstall {{ .Values.system.K8sManager.ReleaseName }} --namespace {{ .Release.Namespace }}\033[0m";
+                    exit 1
+                  fi
+                else
+                  echo -e "\033[33m{{ .Values.system.K8sManager.ReleaseName }} not found, skipping uninstall.\033[0m";
+                  exit 0
+                fi
