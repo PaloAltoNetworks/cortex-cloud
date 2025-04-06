@@ -37,6 +37,12 @@ optionalValues:
 
 system:
   # ==========================
+  # Agent Configuration
+  # ==========================
+  K8sManager:
+    ReleaseName: "k8s-connector-release"  # Release name of the agent manager  (used for identification in the cluster)
+
+  # ==========================
   # Batch Resources
   # ==========================
   batch:

@@ -11,6 +11,7 @@ data:
   RELEASE_NAME: {{.Release.Name | quote }}
   CHART_NAME: {{ .Chart.Name | quote }}
   CHART_VERSION: {{ .Values.image.tag | quote }}
+  K8S_MANAGER_RELEASE_NAME: {{ .Values.system.K8sManager.ReleaseName | quote }}
   {{- if .Values.optionalValues }}
   {{- range $key, $value := .Values.optionalValues }}
   {{ $key }}: {{ $value | quote }}
