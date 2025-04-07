@@ -49,10 +49,7 @@ spec:
                     echo -e "\033[32mSuccessfully uninstalled {{ .Values.system.K8sManager.ReleaseName }}.\033[0m";
                     exit 0
                   else
-                    echo -e "\033[31mWe attempted to uninstall all related components, but an internal cleanup step failed. \n\
-                          As a result, some resources may not have been fully removed. \n\
-                          To complete the uninstallation manually, please run the following command: \n \
-                          helm uninstall {{ .Values.system.K8sManager.ReleaseName }} --namespace {{ .Release.Namespace }}\033[0m";
+                    echo -e "\033[31mWe attempted to uninstall all related components, but an internal cleanup step failed. \nAs a result, some resources may not have been fully removed. \nTo complete the uninstallation manually, please run the following command: \n helm uninstall {{ .Values.system.K8sManager.ReleaseName }} {{ .Release.Name }} --namespace {{ .Release.Namespace }}\033[0m";
                     exit 1
                   fi
                 else
