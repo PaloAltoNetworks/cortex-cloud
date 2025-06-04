@@ -41,5 +41,11 @@ jobs:
         uses: helm/kind-action@dda0770415bac9fc20092cacbc54aa298604d140 # v1.8.0
         if: steps.list-changed.outputs.changed == 'true'
 
+      # Add this step to create the 'pan' namespace before ct install
+      - name: Create 'pan' namespace
+        if: steps.list-changed.outputs.changed == 'true'
+        run: kubectl create namespace pan
+
       - name: Run chart-testing (install)
+        if: steps.list-changed.outputs.changed == 'true'
         run: ct install --config ct.yaml
