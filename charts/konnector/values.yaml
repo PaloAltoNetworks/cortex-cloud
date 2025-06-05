@@ -130,6 +130,19 @@ system:
         - apiGroups: ["apiextensions.k8s.io"]
           resources: ["customresourcedefinitions"]
           verbs: ["create", "get", "patch", "delete"]
+    node-vm-discovery:
+      rules:
+        - apiGroups: [""]
+          resources: ["nodes"]
+          verbs: ["get", "list", "patch"]
+    openshift-cluster-info:
+      rules:
+        - apiGroups: ["config.openshift.io"]
+          resources: ["clusterversions"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["aro.openshift.io"]
+          resources: ["clusters"]
+          verbs: ["get", "list", "watch"]
     otel:
       rules:
         - apiGroups: [""]
