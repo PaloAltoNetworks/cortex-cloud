@@ -135,13 +135,25 @@ system:
         - apiGroups: [""]
           resources: ["nodes"]
           verbs: ["get", "list", "patch"]
-    openshift-cluster-info:
+    openshift-permissions:
       rules:
         - apiGroups: ["config.openshift.io"]
-          resources: ["clusterversions"]
+          resources: ["clusterversions", "apiservers", "authentications", "clusteroperators", "oauths"]
           verbs: ["get", "list", "watch"]
         - apiGroups: ["aro.openshift.io"]
           resources: ["clusters"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["operator.openshift.io"]
+          resources: ["kubeapiservers", "openshiftapiservers", "ingresscontrollers", "networks"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["image.openshift.io"]
+          resources: ["images", "imagestreams"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["route.openshift.io"]
+          resources: ["routes"]
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["security.openshift.io"]
+          resources: ["securitycontextconstraints"]
           verbs: ["get", "list", "watch"]
     otel:
       rules:
