@@ -138,7 +138,7 @@ system:
     openshift-permissions:
       rules:
         - apiGroups: ["config.openshift.io"]
-          resources: ["clusterversions", "apiservers", "authentications", "clusteroperators", "oauths"]
+          resources: ["clusterversions", "apiservers", "authentications", "clusteroperators", "oauths", "infrastructures"]
           verbs: ["get", "list", "watch"]
         - apiGroups: ["aro.openshift.io"]
           resources: ["clusters"]
