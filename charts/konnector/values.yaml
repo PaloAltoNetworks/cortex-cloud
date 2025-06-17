@@ -177,7 +177,7 @@ system:
           verbs: ["get", "list", "watch"]
 
   extraClusterRoleBindings:
-    openshift-anyuid-binding:
+    openshift-anyuid-crole-binding:
       roleRef:
         name: system:openshift:scc:anyuid
 
