@@ -64,3 +64,21 @@ roleRef:
   name: {{ $roleName }}
   apiGroup: rbac.authorization.k8s.io
 {{- end }}
+
+{{- range $bindingName, $bindingInfo := .Values.system.extraClusterRoleBindings }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $bindingName }}
+  labels:
+    {{- include "common.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ $namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $bindingInfo.roleRef.name }}
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

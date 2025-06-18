@@ -176,6 +176,11 @@ system:
           resources: ["horizontalpodautoscalers"]
           verbs: ["get", "list", "watch"]
 
+  extraClusterRoleBindings:
+    openshift-anyuid-crole-binding:
+      roleRef:
+        name: system:openshift:scc:anyuid
+
   # ==========================
   # Secrets Resources
   # ==========================
