@@ -60,3 +60,13 @@ spec:
               readOnly: true
       restartPolicy: Never
 {{- end -}}
+
+{{/* Returns true if the anyuid SCC exists and is accessible, false otherwise */}}
+{{- define "common.hasAnyuidSCC" -}}
+  {{- if has "security.openshift.io/v1" .Capabilities.APIVersions }}
+    {{- $scc := lookup "security.openshift.io/v1" "SecurityContextConstraints" "" "anyuid" }}
+    {{- if $scc }}true{{ else }}false{{ end }}
+  {{- else }}
+    false
+  {{- end }}
+{{- end }}
