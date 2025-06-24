@@ -102,8 +102,11 @@ system:
           verbs: ["create", "patch", "delete"]
     cluster-manager:
       rules:
-        - apiGroups: ["", "coordination.k8s.io"]
-          resources: ["leases", "namespaces", "secrets", "configmaps"]
+        - apiGroups: [""]
+          resources: ["namespaces", "secrets", "configmaps"]
+          verbs: ["get", "update", "patch", "list", "watch"]
+        - apiGroups: ["coordination.k8s.io"]
+          resources: ["leases"]
           verbs: ["get", "update", "patch", "list", "watch"]
         - apiGroups: ["admissionregistration.k8s.io"]
           resources: ["validatingwebhookconfigurations"]
@@ -135,13 +138,15 @@ system:
         - apiGroups: [""]
           resources: ["nodes"]
           verbs: ["get", "list", "patch"]
-    openshift-permissions:
+    aro-openshift-permissions:
+      rules:
+        - apiGroups: ["aro.openshift.io"]
+          resources: ["clusters"]
+          verbs: ["get", "list", "watch"]
+    general-openshift-permissions:
       rules:
         - apiGroups: ["config.openshift.io"]
           resources: ["clusterversions", "apiservers", "authentications", "clusteroperators", "oauths", "infrastructures"]
-          verbs: ["get", "list", "watch"]
-        - apiGroups: ["aro.openshift.io"]
-          resources: ["clusters"]
           verbs: ["get", "list", "watch"]
         - apiGroups: ["operator.openshift.io"]
           resources: ["kubeapiservers", "openshiftapiservers", "ingresscontrollers", "networks"]
@@ -166,9 +171,6 @@ system:
         - apiGroups: ["apps"]
           resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
           verbs: ["get", "list", "watch"]
-        - apiGroups: ["extensions"]
-          resources: ["daemonsets", "deployments", "replicasets"]
-          verbs: ["get", "list", "watch"]
         - apiGroups: ["batch"]
           resources: ["jobs", "cronjobs"]
           verbs: ["get", "list", "watch"]
@@ -179,6 +181,7 @@ system:
   extraClusterRoleBindings:
     openshift-anyuid-crole-binding:
       roleRef:
+        apiGroup: security.openshift.io/v1
         name: system:openshift:scc:anyuid
 
   # ==========================
