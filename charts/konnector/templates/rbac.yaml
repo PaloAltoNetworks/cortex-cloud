@@ -38,10 +38,12 @@ roleRef:
 {{- range $roleName, $roleInfo := .Values.system.clusterRoles }}
 ---
 {{- $allGroupsAvailable := true }}
-{{- range $rule := $roleInfo.rules }}
-  {{- range $group := $rule.apiGroups }}
-    {{- if not (hasKey $availableApis $group) }}
-      {{- $allGroupsAvailable = false }}
+{{- if not $roleInfo.skipValidation }}
+  {{- range $rule := $roleInfo.rules }}
+    {{- range $group := $rule.apiGroups }}
+      {{- if not (hasKey $availableApis $group) }}
+        {{- $allGroupsAvailable = false }}
+      {{- end }}
     {{- end }}
   {{- end }}
 {{- end }}

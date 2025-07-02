@@ -177,6 +177,15 @@ system:
         - apiGroups: ["autoscaling"]
           resources: ["horizontalpodautoscalers"]
           verbs: ["get", "list", "watch"]
+    konnector-bc:
+      skipValidation: "true"
+      rules:
+        - apiGroups: [ "extensions" ]
+          resources: [ "daemonsets", "deployments", "replicasets" ]
+          verbs: [ "get", "list", "watch" ]
+        - apiGroups: [ "", "coordination.k8s.io" ]
+          resources: [ "leases", "namespaces", "secrets", "configmaps" ]
+          verbs: ["get", "update", "patch", "list", "watch"]
 
   extraClusterRoleBindings:
     konnector-openshift-anyuid:
