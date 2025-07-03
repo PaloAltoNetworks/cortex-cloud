@@ -60,3 +60,16 @@ spec:
               readOnly: true
       restartPolicy: Never
 {{- end -}}
+
+{{- define "common.apiGroupsWithoutVersions" }}
+{{- $groups := dict }}
+{{- range .Capabilities.APIVersions }}
+  {{- $parts := splitList "/" . }}
+  {{- $key := "" }}
+  {{- if gt (len $parts) 1 }}
+    {{- $key = index $parts 0 }}
+  {{- end }}
+  {{- $_ := set $groups $key true }}
+{{- end }}
+{{ $groups | toYaml }}
+{{- end }}
