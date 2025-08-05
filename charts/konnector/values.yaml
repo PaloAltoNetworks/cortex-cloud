@@ -210,6 +210,13 @@ system:
   # Apps Configurations
   # ==========================
   apps:
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: PreferNoSchedule
+      - operator: Exists
+        effect: NoExecute
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
