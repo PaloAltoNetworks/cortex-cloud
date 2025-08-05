@@ -205,3 +205,26 @@ system:
       name: backend-auth-secret  # Secret holding backend authentication credentials (e.g. API tokens)
     dockerSecret:
       name: konnector-docker-secret  # Secret for Docker credentials (e.g., for pulling private images)
+
+
+  # ==========================
+  # Apps Configurations
+  # ==========================
+  apps:
+    tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: PreferNoSchedule
+      - operator: Exists
+        effect: NoExecute
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: kubernetes.io/arch
+                  operator: In
+                  values:
+                    - amd64
+                    - arm64
