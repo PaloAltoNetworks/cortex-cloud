@@ -211,12 +211,10 @@ system:
   # ==========================
   apps:
     tolerations:
-      - operator: Exists
-        effect: NoSchedule
-      - operator: Exists
-        effect: PreferNoSchedule
-      - operator: Exists
-        effect: NoExecute
+      - key: "kubernetes.io/arch"
+        operator: "Equal"
+        value: "arm64"
+        effect: "NoSchedule"
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
