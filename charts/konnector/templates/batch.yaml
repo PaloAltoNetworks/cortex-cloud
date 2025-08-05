@@ -56,10 +56,6 @@ spec:
                   echo -e "\033[33m{{ .Values.system.K8sManager.ReleaseName }} not found, skipping uninstall.\033[0m";
                   exit 0
                 fi
-     {{- with .Values.system.apps.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
      {{- with .Values.system.apps.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

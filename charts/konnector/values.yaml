@@ -206,18 +206,10 @@ system:
     dockerSecret:
       name: konnector-docker-secret  # Secret for Docker credentials (e.g., for pulling private images)
 
-
   # ==========================
   # Apps Configurations
   # ==========================
   apps:
-    tolerations:
-      - operator: Exists
-        effect: NoSchedule
-      - operator: Exists
-        effect: PreferNoSchedule
-      - operator: Exists
-        effect: NoExecute
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
