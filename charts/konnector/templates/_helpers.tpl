@@ -32,6 +32,14 @@ spec:
         {{- include "common.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Release.Name }}
     spec:
+      {{- with .Values.system.apps.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.system.apps.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: {{ .Values.system.secrets.backendAuth.name }}
           secret:
