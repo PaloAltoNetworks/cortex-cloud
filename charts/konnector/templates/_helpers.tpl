@@ -63,12 +63,12 @@ spec:
             - name: HTTP_PROXY
               valueFrom:
                 secretKeyRef:
-                  name: proxy-url
+                  name: konnector-proxy
                   key: proxy-url
             - name: HTTPS_PROXY
               valueFrom:
                 secretKeyRef:
-                  name: proxy-url
+                  name: konnector-proxy
                   key: proxy-url
             {{- end }}
           envFrom:
