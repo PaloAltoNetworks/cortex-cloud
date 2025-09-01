@@ -31,7 +31,7 @@ optionalValues:
 
 
 proxyValues:
-  PROXY_URL: ""           # Optional proxy URL for external network access
+  proxy_url: ""           # Optional proxy URL for external network access
 # ==========================
 # ### System Section ###
 # ==========================

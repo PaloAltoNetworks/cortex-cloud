@@ -59,7 +59,7 @@ spec:
                 secretKeyRef:
                   name: distribution-id
                   key: distribution-id
-            {{- if and .Values.proxyValues .Values.proxyValues.PROXY_URL }}
+            {{- if and .Values.proxyValues .Values.proxyValues.proxy_url }}
             - name: HTTP_PROXY
               valueFrom:
                 secretKeyRef:
