@@ -29,6 +29,9 @@ optionalValues:
   UPLOAD_LOG_LEVEL: "ERROR"  # Log level for uploading logs ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
   CONSOLE_LOG_LEVEL: "INFO"  # Log level for console output ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
 
+
+proxyValues:
+  PROXY_URL: ""           # Optional proxy URL for external network access
 # ==========================
 # ### System Section ###
 # ==========================

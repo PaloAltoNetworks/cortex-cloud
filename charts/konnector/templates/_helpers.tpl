@@ -59,6 +59,18 @@ spec:
                 secretKeyRef:
                   name: distribution-id
                   key: distribution-id
+            {{- if and .Values.proxyValues .Values.proxyValues.PROXY_URL }}
+            - name: HTTP_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: proxy-url
+                  key: proxy-url
+            - name: HTTPS_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: proxy-url
+                  key: proxy-url
+            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ .Values.system.configMap.global.name }}
