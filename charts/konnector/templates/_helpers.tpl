@@ -70,6 +70,11 @@ spec:
                 secretKeyRef:
                   name: konnector-proxy
                   key: proxy-url
+            - name: NO_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: konnector-proxy
+                  key: no-proxy
             {{- end }}
           envFrom:
             - configMapRef:
