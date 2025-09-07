@@ -59,7 +59,6 @@ spec:
                 secretKeyRef:
                   name: distribution-id
                   key: distribution-id
-            {{- if and .Values.proxyValues .Values.proxyValues.proxy_url }}
             - name: HTTP_PROXY
               valueFrom:
                 secretKeyRef:
@@ -75,7 +74,6 @@ spec:
                 secretKeyRef:
                   name: konnector-proxy
                   key: no-proxy
-            {{- end }}
           envFrom:
             - configMapRef:
                 name: {{ .Values.system.configMap.global.name }}
