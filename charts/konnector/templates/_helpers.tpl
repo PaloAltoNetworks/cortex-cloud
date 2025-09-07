@@ -63,17 +63,17 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: konnector-proxy
-                  key: proxy-url
+                  key: proxy_url
             - name: HTTPS_PROXY
               valueFrom:
                 secretKeyRef:
                   name: konnector-proxy
-                  key: proxy-url
+                  key: proxy_url
             - name: NO_PROXY
               valueFrom:
                 secretKeyRef:
                   name: konnector-proxy
-                  key: no-proxy
+                  key: no_proxy
           envFrom:
             - configMapRef:
                 name: {{ .Values.system.configMap.global.name }}
