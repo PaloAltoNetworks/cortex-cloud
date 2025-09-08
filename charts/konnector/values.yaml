@@ -32,7 +32,7 @@ optionalValues:
 
 proxyValues:
   proxy_url: ""           # Optional proxy URL for external network access
-  no_proxy: ""          # List of addresses/domains that should bypass the proxy
+  no_proxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"          # List of addresses/domains that should bypass the proxy
 # ==========================
 # ### System Section ###
 # ==========================
