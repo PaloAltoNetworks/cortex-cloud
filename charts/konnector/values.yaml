@@ -29,6 +29,9 @@ optionalValues:
   UPLOAD_LOG_LEVEL: "ERROR"  # Log level for uploading logs ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
   CONSOLE_LOG_LEVEL: "INFO"  # Log level for console output ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
 
+proxyValues:
+  httpProxy: ""  # Optional proxy URL for external network access
+  noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
 # ==========================
 # ### System Section ###
 # ==========================

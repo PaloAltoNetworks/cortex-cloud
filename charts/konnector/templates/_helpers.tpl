@@ -59,6 +59,21 @@ spec:
                 secretKeyRef:
                   name: distribution-id
                   key: distribution-id
+            - name: HTTP_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: konnector-proxy
+                  key: httpProxy
+            - name: HTTPS_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: konnector-proxy
+                  key: httpProxy
+            - name: NO_PROXY
+              valueFrom:
+                secretKeyRef:
+                  name: konnector-proxy
+                  key: noProxy
           envFrom:
             - configMapRef:
                 name: {{ .Values.system.configMap.global.name }}
