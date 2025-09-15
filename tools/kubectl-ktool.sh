@@ -3,7 +3,7 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v1.1.0"
+VERSION="v1.0.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 RELEASE_BRANCH="ktool"
@@ -165,6 +165,11 @@ collect_logs() {
                 ;;
         esac
     done
+
+    echo "--> Verifying namespace '${NAMESPACE}' exists..."
+    if ! kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get namespace "${NAMESPACE}" &> /dev/null; then
+        error "Namespace '${NAMESPACE}' not found. Please verify the namespace name and your cluster context."
+    fi
 
     HELM_RELEASE_1="konnector"
     HELM_RELEASE_2="k8s-connector-manager"
