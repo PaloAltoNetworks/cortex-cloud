@@ -3,11 +3,11 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v0.2.0"
+VERSION="v0.3.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 # The path to the script within the GitHub repository.
-GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
+GITHUB_SCRIPT_PATH="tool/kubectl-ktool.sh"
 
 
 # --- Helper Functions ---
@@ -34,6 +34,7 @@ usage() {
     echo "Options for 'collect-logs':"
     echo "  -n, --namespace <namespace>   The namespace where the agent is installed. (Default: pan)"
     echo "  --kubeconfig <path>           Path to a specific kubeconfig file to use."
+    echo "  --context <context>           The name of the kubeconfig context to use."
     echo
     echo "Run 'kubectl ktool <command> --help' for more information on a specific command."
     exit 1
@@ -123,6 +124,7 @@ handle_version() {
 collect_logs() {
     NAMESPACE="pan"
     KUBECONFIG_FLAG=""
+    CONTEXT_FLAG=""
     shift
     while [[ "$#" -gt 0 ]]; do
         case $1 in
@@ -132,6 +134,10 @@ collect_logs() {
                 ;;
             --kubeconfig)
                 KUBECONFIG_FLAG="--kubeconfig $2"
+                shift 2
+                ;;
+            --context)
+                CONTEXT_FLAG="--context $2"
                 shift 2
                 ;;
             *)
@@ -161,35 +167,35 @@ collect_logs() {
     # 1. Cluster Info
     echo "[1/6] Collecting Cluster Information..."
     mkdir -p "${BUNDLE_DIR}/cluster-info"
-    collect_cmd "Kubernetes version" "kubectl ${KUBECONFIG_FLAG} version" "cluster-info/version.txt"
-    collect_cmd "Node details" "kubectl ${KUBECONFIG_FLAG} get nodes -o wide" "cluster-info/nodes.txt"
+    collect_cmd "Kubernetes version" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} version" "cluster-info/version.txt"
+    collect_cmd "Node details" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get nodes -o wide" "cluster-info/nodes.txt"
 
     # 2. Namespace Info
     echo "[2/6] Collecting Namespace Information..."
     mkdir -p "${BUNDLE_DIR}/namespace-info"
-    collect_cmd "Events in namespace" "kubectl ${KUBECONFIG_FLAG} get events -n ${NAMESPACE} --sort-by='.lastTimestamp'" "namespace-info/events.txt"
+    collect_cmd "Events in namespace" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get events -n ${NAMESPACE} --sort-by='.lastTimestamp'" "namespace-info/events.txt"
 
     # 3. Helm Info
     echo "[3/6] Collecting Helm Release Information..."
     mkdir -p "${BUNDLE_DIR}/helm"
-    collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
-    collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
+    collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
+    collect_cmd "Helm values for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
+    collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
+    collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
 
     # 4. Workload Status & Descriptions
     echo "[4/6] Collecting Workload Statuses..."
     mkdir -p "${BUNDLE_DIR}/workloads"
-    collect_cmd "All workloads (wide)" "kubectl ${KUBECONFIG_FLAG} get all -n ${NAMESPACE} -o wide" "workloads/get-all-wide.txt"
-    collect_cmd "All workloads (yaml)" "kubectl ${KUBECONFIG_FLAG} get all -n ${NAMESPACE} -o yaml" "workloads/get-all.yaml"
+    collect_cmd "All workloads (wide)" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get all -n ${NAMESPACE} -o wide" "workloads/get-all-wide.txt"
+    collect_cmd "All workloads (yaml)" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get all -n ${NAMESPACE} -o yaml" "workloads/get-all.yaml"
     
     echo "  -> Describing all workloads..."
     for kind in pod deployment statefulset daemonset service configmap replicaset ingress; do
-        RESOURCES=$(kubectl ${KUBECONFIG_FLAG} get "$kind" -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+        RESOURCES=$(kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get "$kind" -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
         if [ -n "$RESOURCES" ]; then
             mkdir -p "${BUNDLE_DIR}/workloads/${kind}"
             for name in $RESOURCES; do
-                collect_cmd "${kind}/${name}" "kubectl ${KUBECONFIG_FLAG} describe ${kind} ${name} -n ${NAMESPACE}" "workloads/${kind}/${name}.describe.txt"
+                collect_cmd "${kind}/${name}" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} describe ${kind} ${name} -n ${NAMESPACE}" "workloads/${kind}/${name}.describe.txt"
             done
         fi
     done
@@ -197,22 +203,22 @@ collect_logs() {
     # 5. Pod Logs
     echo "[5/6] Collecting Pod Logs..."
     mkdir -p "${BUNDLE_DIR}/logs"
-    PODS=$(kubectl ${KUBECONFIG_FLAG} get pods -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+    PODS=$(kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get pods -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
     for pod in $PODS; do
-        CONTAINERS=$(kubectl ${KUBECONFIG_FLAG} get pod "$pod" -n "$NAMESPACE" -o jsonpath='{.spec.containers[*].name} {.spec.initContainers[*].name}' 2>/dev/null)
+        CONTAINERS=$(kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get pod "$pod" -n "$NAMESPACE" -o jsonpath='{.spec.containers[*].name} {.spec.initContainers[*].name}' 2>/dev/null)
         for container in $CONTAINERS; do
-            collect_cmd "Logs for ${pod}/${container}" "kubectl ${KUBECONFIG_FLAG} logs ${pod} -c ${container} -n ${NAMESPACE}" "logs/${pod}_${container}.log"
-            collect_cmd "Previous logs for ${pod}/${container}" "kubectl ${KUBECONFIG_FLAG} logs ${pod} -c ${container} -n ${NAMESPACE} --previous" "logs/${pod}_${container}.previous.log"
+            collect_cmd "Logs for ${pod}/${container}" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} logs ${pod} -c ${container} -n ${NAMESPACE}" "logs/${pod}_${container}.log"
+            collect_cmd "Previous logs for ${pod}/${container}" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} logs ${pod} -c ${container} -n ${NAMESPACE} --previous" "logs/${pod}_${container}.previous.log"
         done
     done
 
     # 6. Operator-Specific Info
     echo "[6/6] Collecting Operator Configurations..."
     mkdir -p "${BUNDLE_DIR}/operator"
-    collect_cmd "Validating Webhooks" "kubectl ${KUBECONFIG_FLAG} get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/validating-webhooks.yaml"
-    collect_cmd "Mutating Webhooks" "kubectl ${KUBECONFIG_FLAG} get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/mutating-webhooks.yaml"
+    collect_cmd "Validating Webhooks" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/validating-webhooks.yaml"
+    collect_cmd "Mutating Webhooks" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/mutating-webhooks.yaml"
     # Add any CRD collections here, for example:
-    # collect_cmd "MyCRD Instances" "kubectl ${KUBECONFIG_FLAG} get mycrds -n ${NAMESPACE} -o yaml" "operator/mycrds.yaml"
+    # collect_cmd "MyCRD Instances" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get mycrds -n ${NAMESPACE} -o yaml" "operator/mycrds.yaml"
     
     # --- Packaging ---
     echo "Packaging support bundle..."
