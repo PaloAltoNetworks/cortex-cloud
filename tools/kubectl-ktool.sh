@@ -7,7 +7,7 @@ VERSION="v2.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 # The path to the script within the GitHub repository.
-GITHUB_SCRIPT_PATH="tool/kubectl-ktool.sh"
+GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
 
 
 # --- Helper Functions ---
