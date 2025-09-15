@@ -3,11 +3,12 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v2.1.0"
+VERSION="v1.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
-# The path to the script within the GitHub repository.
+RELEASE_BRANCH="ktool"
 GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
+SCRIPT_SOURCE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${RELEASE_BRANCH}/${GITHUB_SCRIPT_PATH}"
 
 
 # --- Helper Functions ---
@@ -43,10 +44,15 @@ usage() {
 
 # --- Automatic Update Check Logic ---
 check_for_updates() {
-    local script_source_url="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/${GITHUB_SCRIPT_PATH}"
-    
+    # Do not run the check if the command is 'upgrade' or 'version' or 'help'
+    case "$1" in
+        upgrade|version|""|-h|--help)
+            return
+            ;;
+    esac
+
     local LATEST_VERSION_CONTENT
-    LATEST_VERSION_CONTENT=$(curl --max-time 2 -fsSL "${script_source_url}" 2>/dev/null)
+    LATEST_VERSION_CONTENT=$(curl --max-time 2 -fsSL "${SCRIPT_SOURCE_URL}" 2>/dev/null)
 
     if [ -z "$LATEST_VERSION_CONTENT" ]; then
         return
@@ -64,11 +70,11 @@ check_for_updates() {
     local LATEST_MAJOR_VERSION=$(echo "$LATEST_VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
 
     if [ "$LATEST_MAJOR_VERSION" -gt "$CURRENT_MAJOR_VERSION" ]; then
-        error "Mandatory update required. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
+        WARN "MANDATORY UPDATE RECOMMENDED. A new major version (${LATEST_VERSION}) is available with breaking changes. Please run 'kubectl ktool upgrade'."
+    else
+        # If not a major version, show a non-blocking warning
+        WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
     fi
-    
-    # If not a major version, show a non-blocking warning
-    WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
 }
 
 
@@ -76,12 +82,11 @@ check_for_updates() {
 handle_upgrade() {
     echo "Current version: ${VERSION}"
     
-    local script_source_url="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/${GITHUB_SCRIPT_PATH}"
     local TMP_FILE="/tmp/kubectl-ktool.new.$$"
 
-    echo "Fetching latest version from ktool branch..."
-    if ! curl -fsSL "${script_source_url}" -o "${TMP_FILE}"; then
-        error "Could not download the latest script from the 'ktool' branch."
+    echo "Fetching latest version from ${RELEASE_BRANCH} branch..."
+    if ! curl -fsSL "${SCRIPT_SOURCE_URL}" -o "${TMP_FILE}"; then
+        error "Could not download the latest script from the '${RELEASE_BRANCH}' branch."
         rm -f "${TMP_FILE}"
         exit 1
     fi
@@ -89,7 +94,7 @@ handle_upgrade() {
     LATEST_VERSION=$(grep '^VERSION=' "${TMP_FILE}" | sed -E 's/VERSION="([^"]+)"/\1/')
 
     if [ -z "$LATEST_VERSION" ]; then
-        error "Could not determine the latest version from the 'ktool' branch."
+        error "Could not determine the latest version from the script on the '${RELEASE_BRANCH}' branch."
         rm -f "${TMP_FILE}"
         exit 1
     fi
@@ -231,9 +236,7 @@ collect_logs() {
 
 # --- SCRIPT EXECUTION STARTS HERE ---
 
-if [ "$1" != "upgrade" ]; then
-    check_for_updates
-fi
+check_for_updates "$1"
 
 case "$1" in
     collect-logs)
