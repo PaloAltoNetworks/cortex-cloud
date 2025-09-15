@@ -7,9 +7,7 @@ VERSION="v1.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 RELEASE_BRANCH="ktool"
-# The path to the script within the GitHub repository.
 GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
-# Pre-made source URL for the script, constructed from the variables above.
 SCRIPT_SOURCE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${RELEASE_BRANCH}/${GITHUB_SCRIPT_PATH}"
 
 
