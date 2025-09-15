@@ -31,7 +31,7 @@ handle_upgrade() {
     info "Current version: ${VERSION}"
 
     # --- NEW: Fetch the script from the main branch and read the VERSION variable from it ---
-    local script_url_main="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/bin/kubectl-ktool.sh"
+    local script_url_main="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/tools/kubectl-ktool.sh"
     # Download the script content, find the line starting with VERSION=, and extract the value in quotes.
     LATEST_VERSION=$(curl -s "${script_url_main}" | grep '^VERSION=' | sed -E 's/VERSION="([^"]+)"/\1/')
 
