@@ -4,7 +4,7 @@
 
 # --- CONFIGURATION (SINGLE SOURCE OF TRUTH) ---
 # The version of THIS script. This is the only place you need to update the version.
-VERSION="v0.1.0"
+VERSION="v0.1.1"
 # GitHub repository details for self-upgrading
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
