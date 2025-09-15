@@ -20,9 +20,21 @@ WARN() {
     echo -e "\033[33mWarning:\033[0m $1" >&2
 }
 
+# --- Restored Detailed Usage Function ---
 usage() {
-    echo "Usage: kubectl ktool <command> [options]" >&2
-    echo "Commands: collect-logs, upgrade, version" >&2
+    echo "Usage: kubectl ktool <command> [options]"
+    echo
+    echo "A tool for managing and collecting support data for the Konnector agent."
+    echo
+    echo "Commands:"
+    echo "  collect-logs    Collects a comprehensive diagnostic support bundle."
+    echo "  upgrade         Upgrades this tool to the latest version from GitHub."
+    echo "  version         Prints the current version of this tool."
+    echo
+    echo "Options for 'collect-logs':"
+    echo "  -n, --namespace <namespace>   The namespace where the agent is installed. (Default: pan)"
+    echo
+    echo "Run 'kubectl ktool <command> --help' for more information on a specific command."
     exit 1
 }
 
@@ -119,7 +131,7 @@ collect_logs() {
 
     HELM_RELEASE_1="konnector"
     HELM_RELEASE_2="k8s-connector-manager"
-    BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-$(date +%Y%m%d-%H%M%S)"
+    BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-$(date +"%Y%m%d-%H%M%S")"
     
     echo "Starting support bundle collection for namespace: ${NAMESPACE}"
     echo "Output will be saved to ${BUNDLE_DIR}.tar.gz"
