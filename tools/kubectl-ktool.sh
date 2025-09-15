@@ -1,121 +1,213 @@
 #!/bin/bash
 #
-# kubectl-ktool: A kubectl plugin with various tools for Konnector.
+# kubectl-ktool: A kubectl plugin for the Konnector agent.
 
-# --- CONFIGURATION (SINGLE SOURCE OF TRUTH) ---
-# The version of THIS script. This is the only place you need to update the version.
-VERSION="v0.1.2"
-# GitHub repository details for self-upgrading
+# --- CONFIGURATION ---
+VERSION="v0.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
+# The path to the script within the GitHub repository.
+GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
 
 
-# --- Usage Function ---
-usage() {
-    echo "Usage: kubectl ktool <command> [options]"
-    echo
-    echo "A tool for managing the Konnector agent."
-    echo
-    echo "Commands:"
-    echo "  collect-logs    Collects a diagnostic support bundle."
-    echo "  upgrade         Upgrades kubectl-ktool to the latest version."
-    echo "  version         Prints the current version of the tool."
-    echo
-    echo "Options for 'collect-logs':"
-    echo "  -n, --namespace   The namespace where the agent is installed. (Default: pan)"
+# --- Helper Functions ---
+error() {
+    echo "Error: $1" >&2
+    exit 1
 }
+
+WARN() {
+    echo -e "\033[33mWarning:\033[0m $1" >&2
+}
+
+usage() {
+    echo "Usage: kubectl ktool <command> [options]" >&2
+    echo "Commands: collect-logs, upgrade, version" >&2
+    exit 1
+}
+
+
+# --- Automatic Update Check Logic ---
+check_for_updates() {
+    local script_source_url="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/${GITHUB_SCRIPT_PATH}"
+    
+    local LATEST_VERSION_CONTENT
+    LATEST_VERSION_CONTENT=$(curl --max-time 2 -fsSL "${script_source_url}" 2>/dev/null)
+
+    if [ -z "$LATEST_VERSION_CONTENT" ]; then
+        return
+    fi
+    
+    local LATEST_VERSION
+    LATEST_VERSION=$(echo "$LATEST_VERSION_CONTENT" | grep '^VERSION=' | sed -E 's/VERSION="([^"]+)"/\1/')
+
+    if [ -z "$LATEST_VERSION" ] || [ "$VERSION" == "$LATEST_VERSION" ]; then
+        return
+    fi
+
+    WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
+}
+
 
 # --- Upgrade Command Logic ---
 handle_upgrade() {
-    info "Checking for new versions of kubectl-ktool..."
-    info "Current version: ${VERSION}"
+    echo "Current version: ${VERSION}"
+    
+    local script_source_url="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/${GITHUB_SCRIPT_PATH}"
+    local TMP_FILE="/tmp/kubectl-ktool.new.$$"
 
-    # --- NEW: Fetch the script from the main branch and read the VERSION variable from it ---
-    local script_url_main="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/ktool/tools/kubectl-ktool.sh"
-    # Download the script content, find the line starting with VERSION=, and extract the value in quotes.
-    LATEST_VERSION=$(curl -s "${script_url_main}" | grep '^VERSION=' | sed -E 's/VERSION="([^"]+)"/\1/')
-
-    if [ -z "$LATEST_VERSION" ]; then
-        error "Could not determine the latest version from the script on the main branch."
+    echo "Fetching latest version from ktool branch..."
+    if ! curl -fsSL "${script_source_url}" -o "${TMP_FILE}"; then
+        error "Could not download the latest script from the 'ktool' branch."
+        rm -f "${TMP_FILE}"
         exit 1
     fi
 
-    info "Latest version available: ${LATEST_VERSION}"
+    LATEST_VERSION=$(grep '^VERSION=' "${TMP_FILE}" | sed -E 's/VERSION="([^"]+)"/\1/')
 
+    if [ -z "$LATEST_VERSION" ]; then
+        error "Could not determine the latest version from the 'ktool' branch."
+        rm -f "${TMP_FILE}"
+        exit 1
+    fi
+
+    echo "Latest version available: ${LATEST_VERSION}"
     if [ "$VERSION" == "$LATEST_VERSION" ]; then
-        success "You are already using the latest version. No upgrade needed."
+        echo "You are already using the latest version."
+        rm -f "${TMP_FILE}"
         exit 0
     fi
 
-    info "A new version is available. Upgrading from ${VERSION} to ${LATEST_VERSION}..."
-
     INSTALL_PATH=$(which kubectl-ktool)
     if [ -z "$INSTALL_PATH" ]; then
-        error "Could not determine the installation path of 'kubectl-ktool'. Cannot upgrade automatically."
-        exit 1
-    fi
-
-    # Download URL still points to the file at a specific Git tag for immutability
-    DOWNLOAD_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${LATEST_VERSION}/bin/kubectl-ktool.sh"
-    TMP_FILE="/tmp/kubectl-ktool.new"
-
-    info "Downloading new version from ${DOWNLOAD_URL}..."
-    if ! curl -fsSL "${DOWNLOAD_URL}" -o "${TMP_FILE}"; then
-        error "Download failed. Please try again later."
+        error "Could not determine the installation path of 'kubectl-ktool'."
+        rm -f "${TMP_FILE}"
         exit 1
     fi
 
     chmod +x "${TMP_FILE}"
 
-    info "Replacing old script at ${INSTALL_PATH}..."
     if [[ -w "$(dirname "$INSTALL_PATH")" ]]; then
         mv "${TMP_FILE}" "${INSTALL_PATH}"
     elif command -v sudo &> /dev/null; then
         sudo mv "${TMP_FILE}" "${INSTALL_PATH}"
     else
-        error "Cannot write to ${INSTALL_PATH}. Please run 'kubectl ktool upgrade' with sudo."
+        error "Cannot write to ${INSTALL_PATH}. Please run upgrade command with sudo."
+        rm -f "${TMP_FILE}"
         exit 1
     fi
-
-    success "Upgrade complete! You are now on version ${LATEST_VERSION}."
+    echo "Upgrade complete to version ${LATEST_VERSION}."
 }
 
 
 # --- Version Command Logic ---
 handle_version() {
-    echo "kubectl-ktool version ${VERSION}"
+    echo "${VERSION}"
 }
 
 
-# --- Collect Logs Logic (Placeholder) ---
-# NOTE: This is a placeholder. You need to insert your full log collection logic here.
+# --- Collect Logs Logic (Fully Implemented) ---
 collect_logs() {
-    # --- Argument Parsing for collect-logs ---
-    NAMESPACE="pan" # Set default namespace
-    shift # remove 'collect-logs'
+    NAMESPACE="pan"
+    shift
     while [[ "$#" -gt 0 ]]; do
         case $1 in
             -n|--namespace) NAMESPACE="$2"; shift; shift;;
-            *) echo "Unknown option for collect-logs: $1"; usage; exit 1;;
+            *) error "Unknown option for collect-logs: $1";;
         esac
     done
 
-    # --- Configuration ---
     HELM_RELEASE_1="konnector"
     HELM_RELEASE_2="k8s-connector-manager"
     BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-$(date +%Y%m%d-%H%M%S)"
+    
+    echo "Starting support bundle collection for namespace: ${NAMESPACE}"
+    echo "Output will be saved to ${BUNDLE_DIR}.tar.gz"
 
-    info "Starting support bundle collection for namespace: $NAMESPACE"
-    # PASTE YOUR FULL LOG COLLECTION LOGIC HERE
-    echo "[STUB] Collecting logs for namespace ${NAMESPACE}..."
-    success "Bundle created: ${BUNDLE_DIR}.tar.gz"
+    mkdir -p "${BUNDLE_DIR}"
+
+    # Helper for collecting command output
+    collect_cmd() {
+        local title="$1"
+        local cmd="$2"
+        local file="$3"
+        echo "  -> Collecting ${title}..."
+        bash -c "$cmd" > "${BUNDLE_DIR}/${file}" 2>&1
+    }
+
+    # 1. Cluster Info
+    echo "[1/6] Collecting Cluster Information..."
+    mkdir -p "${BUNDLE_DIR}/cluster-info"
+    collect_cmd "Kubernetes version" "kubectl version" "cluster-info/version.txt"
+    collect_cmd "Node details" "kubectl get nodes -o wide" "cluster-info/nodes.txt"
+
+    # 2. Namespace Info
+    echo "[2/6] Collecting Namespace Information..."
+    mkdir -p "${BUNDLE_DIR}/namespace-info"
+    collect_cmd "Events in namespace" "kubectl get events -n ${NAMESPACE} --sort-by='.lastTimestamp'" "namespace-info/events.txt"
+
+    # 3. Helm Info
+    echo "[3/6] Collecting Helm Release Information..."
+    mkdir -p "${BUNDLE_DIR}/helm"
+    collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
+    collect_cmd "Helm values for ${HELM_RELEASE_1}" "helm get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
+    collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
+    collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
+
+    # 4. Workload Status & Descriptions
+    echo "[4/6] Collecting Workload Statuses..."
+    mkdir -p "${BUNDLE_DIR}/workloads"
+    collect_cmd "All workloads (wide)" "kubectl get all -n ${NAMESPACE} -o wide" "workloads/get-all-wide.txt"
+    collect_cmd "All workloads (yaml)" "kubectl get all -n ${NAMESPACE} -o yaml" "workloads/get-all.yaml"
+    
+    echo "  -> Describing all workloads..."
+    for kind in pod deployment statefulset daemonset service configmap replicaset ingress; do
+        RESOURCES=$(kubectl get "$kind" -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+        if [ -n "$RESOURCES" ]; then
+            mkdir -p "${BUNDLE_DIR}/workloads/${kind}"
+            for name in $RESOURCES; do
+                collect_cmd "${kind}/${name}" "kubectl describe ${kind} ${name} -n ${NAMESPACE}" "workloads/${kind}/${name}.describe.txt"
+            done
+        fi
+    done
+
+    # 5. Pod Logs
+    echo "[5/6] Collecting Pod Logs..."
+    mkdir -p "${BUNDLE_DIR}/logs"
+    PODS=$(kubectl get pods -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
+    for pod in $PODS; do
+        CONTAINERS=$(kubectl get pod "$pod" -n "$NAMESPACE" -o jsonpath='{.spec.containers[*].name} {.spec.initContainers[*].name}' 2>/dev/null)
+        for container in $CONTAINERS; do
+            collect_cmd "Logs for ${pod}/${container}" "kubectl logs ${pod} -c ${container} -n ${NAMESPACE}" "logs/${pod}_${container}.log"
+            collect_cmd "Previous logs for ${pod}/${container}" "kubectl logs ${pod} -c ${container} -n ${NAMESPACE} --previous" "logs/${pod}_${container}.previous.log"
+        done
+    done
+
+    # 6. Operator-Specific Info
+    echo "[6/6] Collecting Operator Configurations..."
+    mkdir -p "${BUNDLE_DIR}/operator"
+    collect_cmd "Validating Webhooks" "kubectl get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/validating-webhooks.yaml"
+    collect_cmd "Mutating Webhooks" "kubectl get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/mutating-webhooks.yaml"
+    # Add any CRD collections here, for example:
+    # collect_cmd "MyCRD Instances" "kubectl get mycrds -n ${NAMESPACE} -o yaml" "operator/mycrds.yaml"
+    
+    # --- Packaging ---
+    echo "Packaging support bundle..."
+    tar -czf "${BUNDLE_DIR}.tar.gz" "${BUNDLE_DIR}"
+    
+    # --- Cleanup ---
+    rm -rf "${BUNDLE_DIR}"
+
+    echo "Support bundle created successfully: ${BUNDLE_DIR}.tar.gz"
 }
 
-# Helper functions for colors and info messages
-info() { echo -e "\033[34m[INFO]\033[0m $1"; }
-success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
-error() { echo -e "\033[31m[ERROR]\033[0m $1"; }
 
+# --- SCRIPT EXECUTION STARTS HERE ---
+
+# Run the non-blocking update check for any command except 'upgrade'.
+if [ "$1" != "upgrade" ]; then
+    check_for_updates
+fi
 
 # --- MAIN COMMAND ROUTER ---
 case "$1" in
@@ -132,8 +224,6 @@ case "$1" in
         usage
         ;;
     *)
-        echo "Error: Unknown command '$1'"
-        usage
-        exit 1
+        error "Unknown command '$1'"
         ;;
 esac
