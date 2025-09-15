@@ -3,7 +3,7 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v1.1.0" # Example: Changed to a v1 version for demonstration
+VERSION="v2.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 # The path to the script within the GitHub repository.
