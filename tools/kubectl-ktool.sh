@@ -3,7 +3,7 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v0.3.0"
+VERSION="v1.1.0" # Example: Changed to a v1 version for demonstration
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 # The path to the script within the GitHub repository.
@@ -59,6 +59,15 @@ check_for_updates() {
         return
     fi
 
+    # --- Major Version Check ---
+    local CURRENT_MAJOR_VERSION=$(echo "$VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
+    local LATEST_MAJOR_VERSION=$(echo "$LATEST_VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
+
+    if [ "$LATEST_MAJOR_VERSION" -gt "$CURRENT_MAJOR_VERSION" ]; then
+        error "Mandatory update required. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
+    fi
+    
+    # If not a major version, show a non-blocking warning
     WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
 }
 
@@ -120,7 +129,7 @@ handle_version() {
 }
 
 
-# --- Collect Logs Logic (Fully Implemented) ---
+# --- Collect Logs Logic ---
 collect_logs() {
     NAMESPACE="pan"
     KUBECONFIG_FLAG=""
@@ -155,7 +164,6 @@ collect_logs() {
 
     mkdir -p "${BUNDLE_DIR}"
 
-    # Helper for collecting command output
     collect_cmd() {
         local title="$1"
         local cmd="$2"
@@ -164,18 +172,15 @@ collect_logs() {
         bash -c "$cmd" > "${BUNDLE_DIR}/${file}" 2>&1
     }
 
-    # 1. Cluster Info
     echo "[1/6] Collecting Cluster Information..."
     mkdir -p "${BUNDLE_DIR}/cluster-info"
     collect_cmd "Kubernetes version" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} version" "cluster-info/version.txt"
     collect_cmd "Node details" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get nodes -o wide" "cluster-info/nodes.txt"
 
-    # 2. Namespace Info
     echo "[2/6] Collecting Namespace Information..."
     mkdir -p "${BUNDLE_DIR}/namespace-info"
     collect_cmd "Events in namespace" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get events -n ${NAMESPACE} --sort-by='.lastTimestamp'" "namespace-info/events.txt"
 
-    # 3. Helm Info
     echo "[3/6] Collecting Helm Release Information..."
     mkdir -p "${BUNDLE_DIR}/helm"
     collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
@@ -183,7 +188,6 @@ collect_logs() {
     collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
     collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
 
-    # 4. Workload Status & Descriptions
     echo "[4/6] Collecting Workload Statuses..."
     mkdir -p "${BUNDLE_DIR}/workloads"
     collect_cmd "All workloads (wide)" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get all -n ${NAMESPACE} -o wide" "workloads/get-all-wide.txt"
@@ -200,7 +204,6 @@ collect_logs() {
         fi
     done
 
-    # 5. Pod Logs
     echo "[5/6] Collecting Pod Logs..."
     mkdir -p "${BUNDLE_DIR}/logs"
     PODS=$(kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get pods -n "$NAMESPACE" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null)
@@ -212,19 +215,14 @@ collect_logs() {
         done
     done
 
-    # 6. Operator-Specific Info
     echo "[6/6] Collecting Operator Configurations..."
     mkdir -p "${BUNDLE_DIR}/operator"
     collect_cmd "Validating Webhooks" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/validating-webhooks.yaml"
     collect_cmd "Mutating Webhooks" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/mutating-webhooks.yaml"
-    # Add any CRD collections here, for example:
-    # collect_cmd "MyCRD Instances" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get mycrds -n ${NAMESPACE} -o yaml" "operator/mycrds.yaml"
     
-    # --- Packaging ---
     echo "Packaging support bundle..."
     tar -czf "${BUNDLE_DIR}.tar.gz" "${BUNDLE_DIR}"
     
-    # --- Cleanup ---
     rm -rf "${BUNDLE_DIR}"
 
     echo "Support bundle created successfully: ${BUNDLE_DIR}.tar.gz"
@@ -233,12 +231,10 @@ collect_logs() {
 
 # --- SCRIPT EXECUTION STARTS HERE ---
 
-# Run the non-blocking update check for any command except 'upgrade'.
 if [ "$1" != "upgrade" ]; then
     check_for_updates
 fi
 
-# --- MAIN COMMAND ROUTER ---
 case "$1" in
     collect-logs)
         collect_logs "$@"
