@@ -3,11 +3,13 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v2.1.0"
+VERSION="v1.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 RELEASE_BRANCH="ktool"
+# The path to the script within the GitHub repository.
 GITHUB_SCRIPT_PATH="tools/kubectl-ktool.sh"
+# Pre-made source URL for the script, constructed from the variables above.
 SCRIPT_SOURCE_URL="https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/${RELEASE_BRANCH}/${GITHUB_SCRIPT_PATH}"
 
 
@@ -51,8 +53,9 @@ check_for_updates() {
         return
     fi
 
+    # Increased timeout for better reliability on slower networks.
     local LATEST_VERSION_CONTENT
-    LATEST_VERSION_CONTENT=$(curl --max-time 2 -fsSL "${SCRIPT_SOURCE_URL}" 2>/dev/null)
+    LATEST_VERSION_CONTENT=$(curl --max-time 3 -fsSL "${SCRIPT_SOURCE_URL}" 2>/dev/null)
 
     if [ -z "$LATEST_VERSION_CONTENT" ]; then
         return
@@ -69,19 +72,15 @@ check_for_updates() {
     local LATEST_MAJOR_VERSION=$(echo "$LATEST_VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
 
     if [ "$LATEST_MAJOR_VERSION" -gt "$CURRENT_MAJOR_VERSION" ]; then
-        # Major version update detected. Decide whether to block or warn.
         case "$command_arg" in
-            # For these safe commands, only show a warning.
             version|""|-h|--help)
                 WARN "MANDATORY UPDATE RECOMMENDED. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
                 ;;
-            # For all other commands, this is a blocking error.
             *)
                 error "Mandatory update required. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
                 ;;
         esac
     else
-        # For minor/patch updates, always show a non-blocking warning.
         WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
     fi
 }
@@ -195,12 +194,17 @@ collect_logs() {
     mkdir -p "${BUNDLE_DIR}/namespace-info"
     collect_cmd "Events in namespace" "kubectl ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get events -n ${NAMESPACE} --sort-by='.lastTimestamp'" "namespace-info/events.txt"
 
+    # 3. Helm Info - now with a check
     echo "[3/6] Collecting Helm Release Information..."
-    mkdir -p "${BUNDLE_DIR}/helm"
-    collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
-    collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
+    if command -v helm &> /dev/null; then
+        mkdir -p "${BUNDLE_DIR}/helm"
+        collect_cmd "Helm status for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
+        collect_cmd "Helm values for ${HELM_RELEASE_1}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
+        collect_cmd "Helm status for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
+        collect_cmd "Helm values for ${HELM_RELEASE_2}" "helm ${KUBECONFIG_FLAG} ${CONTEXT_FLAG} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
+    else
+        WARN "helm command not found. Skipping Helm data collection."
+    fi
 
     echo "[4/6] Collecting Workload Statuses..."
     mkdir -p "${BUNDLE_DIR}/workloads"
@@ -245,6 +249,7 @@ collect_logs() {
 
 # --- SCRIPT EXECUTION STARTS HERE ---
 
+# Run the synchronous update check. This is critical for the blocking logic.
 check_for_updates "$1"
 
 # --- MAIN COMMAND ROUTER ---
