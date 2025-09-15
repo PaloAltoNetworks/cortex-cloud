@@ -44,12 +44,12 @@ usage() {
 
 # --- Automatic Update Check Logic ---
 check_for_updates() {
-    # Do not run the check if the command is 'upgrade' or 'version' or 'help'
-    case "$1" in
-        upgrade|version|""|-h|--help)
-            return
-            ;;
-    esac
+    local command_arg="$1"
+
+    # Don't check for updates when running the upgrade command itself.
+    if [[ "$command_arg" == "upgrade" ]]; then
+        return
+    fi
 
     local LATEST_VERSION_CONTENT
     LATEST_VERSION_CONTENT=$(curl --max-time 2 -fsSL "${SCRIPT_SOURCE_URL}" 2>/dev/null)
@@ -65,14 +65,23 @@ check_for_updates() {
         return
     fi
 
-    # --- Major Version Check ---
     local CURRENT_MAJOR_VERSION=$(echo "$VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
     local LATEST_MAJOR_VERSION=$(echo "$LATEST_VERSION" | cut -d'v' -f2 | cut -d'.' -f1)
 
     if [ "$LATEST_MAJOR_VERSION" -gt "$CURRENT_MAJOR_VERSION" ]; then
-        WARN "MANDATORY UPDATE RECOMMENDED. A new major version (${LATEST_VERSION}) is available with breaking changes. Please run 'kubectl ktool upgrade'."
+        # Major version update detected. Decide whether to block or warn.
+        case "$command_arg" in
+            # For these safe commands, only show a warning.
+            version|""|-h|--help)
+                WARN "MANDATORY UPDATE RECOMMENDED. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
+                ;;
+            # For all other commands, this is a blocking error.
+            *)
+                error "Mandatory update required. A new major version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade'."
+                ;;
+        esac
     else
-        # If not a major version, show a non-blocking warning
+        # For minor/patch updates, always show a non-blocking warning.
         WARN "A new version (${LATEST_VERSION}) is available. Please run 'kubectl ktool upgrade' to update."
     fi
 }
@@ -238,6 +247,7 @@ collect_logs() {
 
 check_for_updates "$1"
 
+# --- MAIN COMMAND ROUTER ---
 case "$1" in
     collect-logs)
         collect_logs "$@"
