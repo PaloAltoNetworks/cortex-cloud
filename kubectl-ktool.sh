@@ -142,7 +142,7 @@ handle_version() {
 
 # --- Collect Logs Logic ---
 collect_logs() {
-    NAMESPACE="pan"
+    NAMESPACE="panw"
     KUBECONFIG_FLAG=""
     CONTEXT_FLAG=""
     shift
