@@ -95,7 +95,7 @@ system:
           resources: ["configmaps", "services", "serviceaccounts"]
           verbs: ["create", "patch", "delete"]
         - apiGroups: ["apps"]
-          resources: ["deployments"]
+          resources: ["deployments", "daemonsets"]
           verbs: ["create", "patch", "delete"]
         - apiGroups: ["batch"]
           resources: ["cronjobs", "jobs"]
