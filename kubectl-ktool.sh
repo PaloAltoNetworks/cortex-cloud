@@ -3,7 +3,7 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v1.0.0"
+VERSION="v1.1.0"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 RELEASE_BRANCH="ktool"
@@ -173,7 +173,7 @@ collect_logs() {
 
     HELM_RELEASE_1="konnector"
     HELM_RELEASE_2="k8s-connector-manager"
-    BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-$(date +"%Y%m%d-%H%M%S")"
+    BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-${VERSION}-$(date +"%Y%m%d-%H%M%S")"
     
     echo "Starting support bundle collection for namespace: ${NAMESPACE}"
     echo "Output will be saved to ${BUNDLE_DIR}.tar.gz"
