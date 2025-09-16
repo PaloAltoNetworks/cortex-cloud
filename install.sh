@@ -1,7 +1,7 @@
 ( \
   set -e; \
   echo "--> Downloading kubectl-ktool..."; \
-  curl -fsSL -o /tmp/kubectl-ktool "https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/ktool/tools/kubectl-ktool.sh"; \
+  curl -fsSL -o /tmp/kubectl-ktool "https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/ktool/kubectl-ktool.sh"; \
   echo "--> Making it executable..."; \
   chmod +x /tmp/kubectl-ktool; \
   echo "--> Moving to /usr/local/bin (may require password)..."; \
