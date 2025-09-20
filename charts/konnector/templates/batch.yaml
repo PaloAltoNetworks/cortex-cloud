@@ -1,10 +1,13 @@
+{{- $ns := .Values.namespace.name }}
+{{- $konnectorJobName := printf "%s-job-revision-%d" .Chart.Name .Release.Revision }}
+{{- $secret := .Values.system.secrets.distribution.name | default "distribution-id" }}
 {{- include "common.validateImage" . }}
 
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: "{{ .Chart.Name }}-job-revision-{{ .Release.Revision }}"
-  namespace: {{ .Values.namespace.name }}
+  name: {{ $konnectorJobName }} 
+  namespace: {{ $ns }}
   labels:
     {{- include "common.labels" . | nindent 4 }}
 {{- include "common.jobTemplate" . | nindent 0 }}
@@ -14,7 +17,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: {{ .Chart.Name }}
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ $ns }}
   labels:
     {{- include "common.labels" . | nindent 4 }}
 spec:
@@ -26,7 +29,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: delete-{{ .Values.system.K8sManager.ReleaseName }}
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ $ns }}
   annotations:
     "helm.sh/hook": pre-delete
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -56,3 +59,31 @@ spec:
                   echo -e "\033[33m{{ .Values.system.K8sManager.ReleaseName }} not found, skipping uninstall.\033[0m";
                   exit 0
                 fi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: delete-{{ .Values.system.secrets.distribution.name }}-secret
+  namespace: {{ $ns }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 60
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: {{ .Values.system.serviceAccount.name }}
+      restartPolicy: "Never"
+      containers:
+        - name: kubectl
+          image: bitnami/kubectl:1.30
+          command: ["sh","-c"]
+          args:
+            - |
+              set -euo pipefail
+              kubectl -n {{ $ns }} get job "{{ $konnectorJobName }}" >/dev/null 2>&1 \
+                && kubectl -n {{ $ns }} wait --for=condition=complete --timeout=2m "job/{{ $konnectorJobName }}" \
+                || echo "Job {{ $konnectorJobName }} not found; continuing."
+              kubectl -n {{ $ns }} delete secret "{{ $secret }}" --ignore-not-found=true

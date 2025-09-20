@@ -192,3 +192,5 @@ system:
       name: backend-auth-secret  # Secret holding backend authentication credentials (e.g. API tokens)
     dockerSecret:
       name: konnector-docker-secret  # Secret for Docker credentials (e.g., for pulling private images)
+    distribution:
+      name: distribution-id
