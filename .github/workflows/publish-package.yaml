@@ -6,6 +6,7 @@ on:
       - ktool
     paths:
       - 'kubectl-ktool.sh'
+      - '.github/workflows/publish-package.yaml' # Rerun if the workflow changes
 
 jobs:
   release:
@@ -39,7 +40,7 @@ jobs:
       - name: Create git tag (if not exists)
         id: tag
         run: |
-          version="${{ steps.extract_version.outputs.version }}"
+          version="ktool-${{ steps.extract_version.outputs.version }}"
           if git rev-parse "$version" >/dev/null 2>&1; then
             echo "Tag $version already exists"
           else
@@ -48,11 +49,8 @@ jobs:
             echo "Tag $version created and pushed"
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836
+      - name: Upload script as artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          tag_name: ${{ steps.extract_version.outputs.version }}
-          name: ${{ steps.extract_version.outputs.version }}
-          files: kubectl-ktool.sh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: kubectl-ktool-${{ steps.extract_version.outputs.version }}
+          path: ./kubectl-ktool.sh
