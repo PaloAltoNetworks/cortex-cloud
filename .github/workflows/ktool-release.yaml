@@ -1,0 +1,58 @@
+name: Auto Release ktool
+
+on:
+  push:
+    branches:
+      - ktool
+    paths:
+      - 'kubectl-ktool.sh'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Extract version from kubectl-ktool.sh script
+        id: extract_version
+        run: |
+          version=$(grep '^VERSION=' kubectl-ktool.sh | head -n1 | cut -d'"' -f2)
+          if [[ -z "$version" ]]; then
+            echo "ERROR: Version not found in script"
+            exit 1
+          fi
+          echo "version=$version" >> $GITHUB_OUTPUT
+
+      - name: Show extracted version
+        run: |
+          echo "Extracted version: ${{ steps.extract_version.outputs.version }}"
+
+      - name: Ensure script executable
+        run: |
+          chmod +x ./kubectl-ktool.sh
+
+      - name: Create git tag (if not exists)
+        id: tag
+        run: |
+          version="${{ steps.extract_version.outputs.version }}"
+          if git rev-parse "$version" >/dev/null 2>&1; then
+            echo "Tag $version already exists"
+          else
+            git tag "$version"
+            git push origin "$version"
+            echo "Tag $version created and pushed"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@6cbd405e2c4e67a21c47fa9e383d020e4e28b836
+        with:
+          tag_name: ${{ steps.extract_version.outputs.version }}
+          name: ${{ steps.extract_version.outputs.version }}
+          files: kubectl-ktool.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
