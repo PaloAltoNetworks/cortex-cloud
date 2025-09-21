@@ -216,8 +216,8 @@ collect_logs() {
         exit 1
     fi
 
-    HELM_RELEASE_1="konnector"
-    HELM_RELEASE_2="k8s-connector-manager"
+    KONNECTOR_HELM_RELEASE="konnector"
+    K8S_MANAGER_HELM_RELEASE="k8s-connector-release"
     BUNDLE_DIR="konnector-support-bundle-${NAMESPACE}-${VERSION}-$(date +"%Y%m%d-%H%M%S")"
     
     echo "Starting support bundle collection for namespace: ${NAMESPACE}"
