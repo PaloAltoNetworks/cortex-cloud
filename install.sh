@@ -1,11 +1,10 @@
-( \
-  set -e; \
-  echo "--> Downloading kubectl-ktool..."; \
-  curl -fsSL -o /tmp/kubectl-ktool "https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/ktool/kubectl-ktool.sh"; \
-  echo "--> Making it executable..."; \
-  chmod +x /tmp/kubectl-ktool; \
-  echo "--> Moving to /usr/local/bin (may require password)..."; \
-  sudo mv /tmp/kubectl-ktool /usr/local/bin/kubectl-ktool; \
-  echo -e "\n\033[32m✅ kubectl-ktool installed successfully!\033[0m"; \
-  echo -e "\nRun 'kubectl ktool version' to verify."; \
-)
+#!/bin/bash
+
+set -e
+
+echo -e "\n\033[1;33m⚠️  DEPRECATION WARNING\033[0m"
+echo -e "This installation script is deprecated and will not run."
+echo -e "\nPlease use the new official installation command below:\n"
+echo -e "  \033[1;32mcurl -fsSL https://raw.githubusercontent.com/PaloAltoNetworks/ktool/main/install.sh | bash\033[0m\n"
+
+exit 1
