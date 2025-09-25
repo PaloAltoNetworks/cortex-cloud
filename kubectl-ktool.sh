@@ -3,7 +3,7 @@
 # kubectl-ktool: A kubectl plugin for the Konnector agent.
 
 # --- CONFIGURATION ---
-VERSION="v1.2.0"
+VERSION="v1.2.1"
 GITHUB_USER="PaloAltoNetworks"
 GITHUB_REPO="cortex-cloud"
 RELEASE_BRANCH="ktool"
@@ -250,10 +250,10 @@ collect_logs() {
 
     echo "[3/6] Collecting Helm Release Information..."
     mkdir -p "${BUNDLE_DIR}/helm"
-    collect_cmd "Helm status for ${HELM_RELEASE_1}" "${HELM_BASE_CMD} status ${HELM_RELEASE_1} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_1}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_1}" "${HELM_BASE_CMD} get values ${HELM_RELEASE_1} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_1}.yaml"
-    collect_cmd "Helm status for ${HELM_RELEASE_2}" "${HELM_BASE_CMD} status ${HELM_RELEASE_2} -n ${NAMESPACE}" "helm/status-${HELM_RELEASE_2}.txt"
-    collect_cmd "Helm values for ${HELM_RELEASE_2}" "${HELM_BASE_CMD} get values ${HELM_RELEASE_2} -n ${NAMESPACE} -a" "helm/values-${HELM_RELEASE_2}.yaml"
+    collect_cmd "Helm status for ${KONNECTOR_HELM_RELEASE}" "${HELM_BASE_CMD} status ${KONNECTOR_HELM_RELEASE} -n ${NAMESPACE}" "helm/status-${KONNECTOR_HELM_RELEASE}.txt"
+    collect_cmd "Helm values for ${KONNECTOR_HELM_RELEASE}" "${HELM_BASE_CMD} get values ${KONNECTOR_HELM_RELEASE} -n ${NAMESPACE} -a" "helm/values-${KONNECTOR_HELM_RELEASE}.yaml"
+    collect_cmd "Helm status for ${K8S_MANAGER_HELM_RELEASE}" "${HELM_BASE_CMD} status ${K8S_MANAGER_HELM_RELEASE} -n ${NAMESPACE}" "helm/status-${K8S_MANAGER_HELM_RELEASE}.txt"
+    collect_cmd "Helm values for ${K8S_MANAGER_HELM_RELEASE}" "${HELM_BASE_CMD} get values ${K8S_MANAGER_HELM_RELEASE} -n ${NAMESPACE} -a" "helm/values-${K8S_MANAGER_HELM_RELEASE}.yaml"
 
     echo "[4/6] Collecting Workload Statuses..."
     mkdir -p "${BUNDLE_DIR}/workloads"
@@ -284,8 +284,8 @@ collect_logs() {
 
     echo "[6/6] Collecting Operator Configurations..."
     mkdir -p "${BUNDLE_DIR}/operator"
-    collect_cmd "Validating Webhooks" "${KUBECTL_BASE_CMD} get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/validating-webhooks.yaml"
-    collect_cmd "Mutating Webhooks" "${KUBECTL_BASE_CMD} get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${HELM_RELEASE_1}, ${HELM_RELEASE_2})' -o yaml" "operator/mutating-webhooks.yaml"
+    collect_cmd "Validating Webhooks" "${KUBECTL_BASE_CMD} get validatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${KONNECTOR_HELM_RELEASE}, ${K8S_MANAGER_HELM_RELEASE})' -o yaml" "operator/validating-webhooks.yaml"
+    collect_cmd "Mutating Webhooks" "${KUBECTL_BASE_CMD} get mutatingwebhookconfigurations -l 'app.kubernetes.io/instance in (${KONNECTOR_HELM_RELEASE}, ${K8S_MANAGER_HELM_RELEASE})' -o yaml" "operator/mutating-webhooks.yaml"
     
     echo "Packaging support bundle..."
     if ! tar -czf "${BUNDLE_DIR}.tar.gz" "${BUNDLE_DIR}"; then
