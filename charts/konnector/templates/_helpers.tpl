@@ -28,8 +28,8 @@ app.kubernetes.io/author: {{ .Values.namespace.name }}
 {{- if $kubeSystemNS -}}
   {{- $kubeSystemNS.metadata.uid -}}
 {{- else -}}
-    {{/* Fallback to prevent errors during helm template or when lookup fails */}}
-    {{- "default-cluster-id" -}}
+  {{/* Fallback to prevent errors during helm template or when lookup fails */}}
+  {{- "default-cluster-id" -}}
 {{- end -}}
 {{- end -}}
 
@@ -40,7 +40,7 @@ app.kubernetes.io/author: {{ .Values.namespace.name }}
 
 {{- define "common.jobTemplate" -}}
 spec:
-  backoffLimit: {{ .Values.system.batch.backoffLimit }}
+
   template:
     metadata:
       labels:
