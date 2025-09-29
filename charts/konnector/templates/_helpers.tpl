@@ -23,6 +23,21 @@ app.kubernetes.io/name: {{ .Chart.Name }}
 app.kubernetes.io/author: {{ .Values.namespace.name }}
 {{- end -}}
 
+{{- define "common.clusterID" -}}
+{{- $kubeSystemNS := lookup "v1" "Namespace" "" "kube-system" -}}
+{{- if $kubeSystemNS -}}
+  {{- $kubeSystemNS.metadata.uid -}}
+{{- else -}}
+  {{/* Fallback to prevent errors during helm template or when lookup fails */}}
+  {{- "default-cluster-id" -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "common.generateSchedule" -}}
+{{- $minute := mod (atoi (substr 0 2 (regexReplaceAll "[^0-9]" (sha256sum (include "common.clusterID" .)) ""))) 60 -}}
+{{- printf "%d */1 * * *" $minute -}}
+{{- end -}}
+
 {{- define "common.jobTemplate" -}}
 spec:
   backoffLimit: {{ .Values.system.batch.backoffLimit }}

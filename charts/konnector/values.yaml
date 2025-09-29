@@ -49,7 +49,6 @@ system:
   # Batch Resources
   # ==========================
   batch:
-    schedule: "0 */6 * * *"  # Cron job cadence: Run every 6 hours (e.g., 0th minute of every 6th hour)
     backoffLimit: 4  # Maximum number of retries before the job is considered failed. After 4 attempts, the job will fail.
 
   # ==========================
