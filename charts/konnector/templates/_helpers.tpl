@@ -40,7 +40,7 @@ app.kubernetes.io/author: {{ .Values.namespace.name }}
 
 {{- define "common.jobTemplate" -}}
 spec:
-
+  backoffLimit: {{ .Values.system.batch.backoffLimit }}
   template:
     metadata:
       labels:
