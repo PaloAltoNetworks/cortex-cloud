@@ -32,6 +32,16 @@ optionalValues:
 proxyValues:
   httpProxy: ""  # Optional proxy URL for external network access
   noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
+
+deleteJob:  # These values correspond to a Job used for deleting resources
+  image:
+    repository: "docker.io" # Repository where the image of is stored
+    name: "alpine/helm"     # Name of the image to be used
+    tag: "3.17.2"           # Tag for the image
+    digest: ""              # Image digest (optional)
+  reusePullSecret: false    # Reuse the dockerPullSecret parameter to pull such image
+
+
 # ==========================
 # ### System Section ###
 # ==========================
