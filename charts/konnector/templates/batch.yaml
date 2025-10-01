@@ -18,7 +18,7 @@ metadata:
   labels:
     {{- include "common.labels" . | nindent 4 }}
 spec:
-  schedule: {{ .Values.system.batch.schedule }}
+  schedule: {{ include "common.generateSchedule" . | quote }}
   jobTemplate:
     {{- include "common.jobTemplate" . | nindent 4 }}
 ---
