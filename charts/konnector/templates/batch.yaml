@@ -36,9 +36,12 @@ spec:
     spec:
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       restartPolicy: "Never"
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: helm-uninstall
-          image: alpine/helm:3.17.2
+          image: "{{ .Values.deleteJob.image.repository }}/{{ .Values.deleteJob.image.name }}{{- if .Values.deleteJob.image.tag }}:{{ .Values.deleteJob.image.tag }}{{- end }}{{- if .Values.deleteJob.image.digest }}@{{ .Values.deleteJob.image.digest }}{{- end }}"
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -56,6 +59,19 @@ spec:
                   echo -e "\033[33m{{ .Values.system.K8sManager.ReleaseName }} not found, skipping uninstall.\033[0m";
                   exit 0
                 fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+              - ALL
+      {{- if .Values.deleteJob.secret.reuse }}
+      imagePullSecrets:
+      - name: {{ .Values.system.secrets.dockerSecret.name }}
+      {{- else if .Values.deleteJob.secret.name }}
+      imagePullSecrets:
+      - name: {{ .Values.deleteJob.secret.name }}
+      {{- end }}
      {{- with .Values.system.apps.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
