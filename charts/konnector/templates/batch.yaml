@@ -65,9 +65,12 @@ spec:
             capabilities:
               drop:
               - ALL
-      {{- if and .Values.deleteJob.reusePullSecret .Values.dockerPullSecret }}
+      {{- if .Values.deleteJob.secret.reuse }}
       imagePullSecrets:
       - name: {{ .Values.system.secrets.dockerSecret.name }}
+      {{- else if .Values.deleteJob.secret.name }}
+      imagePullSecrets:
+      - name: {{ .Values.deleteJob.secret.name }}
       {{- end }}
      {{- with .Values.system.apps.tolerations }}
       tolerations:

@@ -19,10 +19,12 @@ namespace:
   name: pan  # Kubernetes namespace where resources will be deployed
 
 dockerPullSecret: ""  # Secret for pulling images from a private registry
+createPullSecret: true  # Create secret to pull images. Set to false if the secret is being created from external source
 
 distribution:
   id: "default-distribution-id"  # Retrieve distribution ID from Palo Alto Networks systems during installation
   url: "https://distributions.traps.paloaltonetworks.com"  # Retrieve distribution URL from Palo Alto Networks systems during installation
+  createSecret: true  # Create the secret corresponding to the distribuition id. Set to false if the secret is being created from external source 
 
 optionalValues:
   CLUSTER_URI: ""    # Cluster URI should be set when metadata service is not reachable from the cluster
@@ -39,8 +41,11 @@ deleteJob:  # These values correspond to a Job used for deleting resources
     name: "alpine/helm"     # Name of the image to be used
     tag: "3.17.2"           # Tag for the image
     digest: ""              # Image digest (optional)
-  reusePullSecret: false    # Reuse the dockerPullSecret parameter to pull such image
-
+  secret:
+    reuse: false            # Reuse the pull secret from the KSPM Connector
+    create: false           # Create Secret to pull the deleteJob image. Set to true if not being exported from external vault
+    dockerPullSecret:       # Value of the pull secret if create is set to true and reuse to false
+    name:                   # Name of the secret to  pull the deleteJob
 
 # ==========================
 # ### System Section ###
