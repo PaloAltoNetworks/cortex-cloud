@@ -115,3 +115,21 @@ spec:
 {{- end }}
 {{ $groups | toYaml }}
 {{- end }}
+
+{{/*
+Return a base64 value for a Secret key:
+- If an existing Secret is present: reuse existing.data[key] (already base64).
+  If that key is missing, fall back to base64 of "" (or change to seed if you prefer).
+- If no existing Secret: use base64 of the provided seed.
+Usage: {{ include "secret.valueOrExistingB64" (dict "existing" $existing "key" "token" "seed" "--set-by-konnnector-at-runtime--") }}
+*/}}
+{{- define "secret.valueOrExistingB64" -}}
+{{- $existing := .existing -}}
+{{- $key := .key -}}
+{{- $seed := .seed | default "--set-by-konnnector-at-runtime--" -}}
+{{- if $existing -}}
+  {{- index $existing.data $key | default (b64enc "") | quote -}}
+{{- else -}}
+  {{- b64enc $seed | quote -}}
+{{- end -}}
+{{- end -}}
