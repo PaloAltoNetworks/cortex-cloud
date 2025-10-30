@@ -161,7 +161,7 @@ system:
           verbs: ["get", "list", "watch"]
         - apiGroups: ["security.openshift.io"]
           resources: ["securitycontextconstraints"]
-          verbs: ["get", "list", "watch", "create", "delete"]
+          verbs: ["get", "list", "watch", "patch", "create", "delete"]
     konnector-otel:
       rules:
         - apiGroups: [""]
