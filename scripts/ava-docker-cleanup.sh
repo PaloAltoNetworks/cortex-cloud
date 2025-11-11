@@ -9,7 +9,7 @@ MATCHED_CONTAINER_IDS=()
 ALL_CONTAINER_IDS=$(docker ps -a -q)
 
 for ID in ${ALL_CONTAINER_IDS}; do
-    ENV_CHECK=$(docker inspect -f "{{range .Config.Env}}{{if eq (split . \"=\").0 \"${ENV_NAME}\"}}{{split . \"=\").1}}{{end}}{{end}}" "$ID" 2>/dev/null)
+    ENV_CHECK=$(docker inspect -f "{{range .Config.Env}}{{$parts := splitn . \"=\" 2}}{{if and (eq (len $parts) 2) (eq (index $parts 0) \"${ENV_NAME}\")}}{{(index $parts 1)}}{{end}}{{end}}" "$ID" 2>/dev/null)
 
     if [[ "$ENV_CHECK" == "$ENV_VALUE" ]]; then
         MATCHED_CONTAINER_IDS+=("$ID")
