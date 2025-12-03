@@ -61,6 +61,7 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      priorityClassName: {{ .Values.priorityClass.high.name }}
       volumes:
         - name: {{ .Values.system.secrets.backendAuth.name }}
           secret:

@@ -37,6 +37,7 @@ spec:
     spec:
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       restartPolicy: "Never"
+      priorityClassName: {{ .Values.priorityClass.high.name }}
       containers:
         - name: helm-uninstall
           image: alpine/helm:3.17.2

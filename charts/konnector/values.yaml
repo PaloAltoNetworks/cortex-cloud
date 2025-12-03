@@ -33,6 +33,14 @@ optionalValues:
 proxyValues:
   httpProxy: ""  # Optional proxy URL for external network access
   noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
+
+priorityClass:
+  critical:
+    name: "cortex-critical"
+    value: 1000000
+  high:
+    name: "cortex-high" # The default value for workloads without priority class defined
+    value: 900000
 # ==========================
 # ### System Section ###
 # ==========================
