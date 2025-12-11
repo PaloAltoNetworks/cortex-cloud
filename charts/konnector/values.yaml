@@ -28,6 +28,7 @@ optionalValues:
   CLUSTER_URI: ""    # Cluster URI should be set when metadata service is not reachable from the cluster
   UPLOAD_LOG_LEVEL: "ERROR"  # Log level for uploading logs ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
   CONSOLE_LOG_LEVEL: "INFO"  # Log level for console output ("ERROR", "WARNING", "INFO", "DEBUG", "PANIC")
+  REGISTRY_SCAN_URL: "" # OpenShift registry scan URL — set by the user if a custom registry URL was configured
 
 proxyValues:
   httpProxy: ""  # Optional proxy URL for external network access
