@@ -50,6 +50,7 @@ system:
   # ==========================
   batch:
     backoffLimit: 4  # Maximum number of retries before the job is considered failed. After 4 attempts, the job will fail.
+    ttlSecondsAfterFinished: 1800  # Automatically delete the job 30 minutes (1800 seconds) after it completes
 
   # ==========================
   # Service Account Resources
