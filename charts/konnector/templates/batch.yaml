@@ -19,6 +19,7 @@ metadata:
     {{- include "common.labels" . | nindent 4 }}
 spec:
   schedule: {{ include "common.generateSchedule" . | quote }}
+  {{- include "common.jobsHistoryLimit" . | nindent 2 }}
   jobTemplate:
     {{- include "common.jobTemplate" . | nindent 4 }}
 ---
