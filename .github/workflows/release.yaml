@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - 'release/*'
 
 jobs:
   release:
@@ -29,9 +30,10 @@ jobs:
           version: v3.13.0
 
       - name: Run chart-releaser
-        uses: helm/chart-releaser-action@cae68fefc6b5f367a0275617c9f83181ba54714f # v1.7.0
+        uses: yishaynaPalo/chart-releaser-action@use-fork-directly
         with:
           charts_dir: charts
+          pre_release: ${{ github.ref != 'refs/heads/main' }}
         env:
           CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           CR_SKIP_EXISTING: true
