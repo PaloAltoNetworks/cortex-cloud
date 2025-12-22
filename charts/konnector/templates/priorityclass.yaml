@@ -1,0 +1,13 @@
+{{- if .Values.priorityClassValues.enabled }}
+{{- range $priority, $class := .Values.priorityClassValues.classes }}
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: {{ $class.name }}
+  labels:
+    {{- include "common.labels" $ | nindent 4 }}
+value: {{ $class.value }}
+description: "This priority class should be used for {{ $priority }} Cortex components."
+---
+{{- end }}
+{{- end }}
