@@ -34,13 +34,16 @@ proxyValues:
   httpProxy: ""  # Optional proxy URL for external network access
   noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
 
-priorityClass:
-  critical:
-    name: "cortex-critical"
-    value: 1000000
-  high:
-    name: "cortex-high" # The default value for workloads without priority class defined
-    value: 900000
+priorityClassValues:
+  enabled: false
+  classes:
+    critical:
+      name: "cortex-critical"
+      value: 1000000
+    high:
+      name: "cortex-high" # The default value for workloads without priority class defined
+      value: 900000
+
 # ==========================
 # ### System Section ###
 # ==========================
@@ -111,6 +114,9 @@ system:
           verbs: ["create", "patch", "delete"]
         - apiGroups: ["rbac.authorization.k8s.io"]
           resources: ["clusterroles", "roles", "rolebindings", "clusterrolebindings"]
+          verbs: ["create", "patch", "delete"]
+        - apiGroups: ["scheduling.k8s.io"]
+          resources: ["priorityclasses"]
           verbs: ["create", "patch", "delete"]
     konnector-cluster-manager:
       rules:
