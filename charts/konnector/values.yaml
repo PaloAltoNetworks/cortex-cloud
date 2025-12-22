@@ -35,7 +35,7 @@ proxyValues:
   noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
 
 priorityClassValues:
-  enabled: false
+  enabled: true
   classes:
     critical:
       name: "cortex-critical"
