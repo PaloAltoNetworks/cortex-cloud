@@ -41,7 +41,7 @@ priorityClassValues:
       name: "cortex-critical"
       value: 1000000
     high:
-      name: "cortex-high" # The default value for workloads without priority class defined
+      name: "cortex-high"  # The default value for workloads without priority class defined
       value: 900000
 
 # ==========================
@@ -214,10 +214,14 @@ system:
       roleRef:
         apiGroup: security.openshift.io/v1
         name: system:openshift:scc:privileged
-    konnector-openshift-registry:
+    konnector-openshift-registry-puller:
       roleRef:
         apiGroup: rbac.authorization.k8s.io/v1
         name: system:image-puller
+    konnector-openshift-registry-viewer:
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io/v1
+        name: registry-viewer
 
   # ==========================
   # Secrets Resources
