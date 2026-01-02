@@ -39,10 +39,10 @@ priorityClassValues:
   classes:
     critical:
       name: "cortex-critical"
-      value: 1000000
+      value: 1001000
     high:
       name: "cortex-high"  # The default value for workloads without priority class defined
-      value: 900000
+      value: 1000000
 
 # ==========================
 # ### System Section ###
