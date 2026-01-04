@@ -72,6 +72,8 @@ spec:
       containers:
         - name: {{ .Values.system.batch.name }}
           image: "{{ .Values.image.repository }}/{{ .Values.image.name }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
+          resources:
+            {{- toYaml .Values.system.apps.resources | nindent 12 }}
           command: [/konnector]
           env:
             - name: NAMESPACE

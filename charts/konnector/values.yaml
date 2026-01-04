@@ -39,10 +39,10 @@ priorityClassValues:
   classes:
     critical:
       name: "cortex-critical"
-      value: 1000000
+      value: 100001000
     high:
       name: "cortex-high"  # The default value for workloads without priority class defined
-      value: 900000
+      value: 100000000
 
 # ==========================
 # ### System Section ###
@@ -64,6 +64,14 @@ system:
     backoffLimit: 4  # Maximum number of retries before the job is considered failed. After 4 attempts, the job will fail.
     ttlSecondsAfterFinished: 3600  # Time-to-live for completed jobs, jobs will be automatically deleted 3600 seconds (1 hour) after completion
     name: "cortex-kspm-reconciler"
+    cleanupJob:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 50Mi
+        limits:
+          cpu: 150m
+          memory: 200Mi
 
   # ==========================
   # Service Account Resources
@@ -237,6 +245,13 @@ system:
   # Apps Configurations
   # ==========================
   apps:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 50Mi
+      limits:
+        cpu: 150m
+        memory: 200Mi
     tolerations:
       - key: "kubernetes.io/arch"
         operator: "Equal"

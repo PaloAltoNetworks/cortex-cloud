@@ -43,6 +43,8 @@ spec:
       containers:
         - name: helm-uninstall
           image: alpine/helm:3.17.2
+          resources:
+            {{- toYaml .Values.system.batch.cleanupJob.resources | nindent 12 }}
           command: ["/bin/sh", "-c"]
           args:
             - |
