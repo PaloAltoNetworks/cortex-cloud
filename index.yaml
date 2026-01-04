@@ -3,6 +3,20 @@ entries:
   konnector:
   - apiVersion: v2
     appVersion: 1.0.0
+    created: "2026-01-04T17:10:22.56014749Z"
+    description: Deploys Palo Alto Networks' Cortex KSPM connector for advanced Kubernetes
+      security posture management.
+    digest: a4bd3d5cef12474b7707564f0372e5542923815ac7042ec44954b3e57e4044a6
+    maintainers:
+    - name: Palo Alto Networks - Cortex KSPM team
+      url: https://www.paloaltonetworks.com
+    name: konnector
+    type: application
+    urls:
+    - https://github.com/PaloAltoNetworks/cortex-cloud/releases/download/konnector-1.0.24-rc.5/konnector-1.0.24-rc.5.tgz
+    version: 1.0.24-rc.5
+  - apiVersion: v2
+    appVersion: 1.0.0
     created: "2025-12-24T11:55:31.234970267Z"
     description: Deploys Palo Alto Networks' Cortex KSPM connector for advanced Kubernetes
       security posture management.
@@ -407,4 +421,4 @@ entries:
     urls:
     - https://github.com/PaloAltoNetworks/cortex-cloud/releases/download/konnector-1.0.0/konnector-1.0.0.tgz
     version: 1.0.0
-generated: "2025-12-24T11:55:31.235237136Z"
+generated: "2026-01-04T17:10:22.560369162Z"
