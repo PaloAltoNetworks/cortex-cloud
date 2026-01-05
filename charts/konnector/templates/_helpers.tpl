@@ -70,11 +70,11 @@ spec:
             secretName: {{ .Values.system.secrets.backendAuth.name }}
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       containers:
-        - name: {{ .Chart.Name }}
+        - name: {{ .Values.system.batch.name }}
           image: "{{ .Values.image.repository }}/{{ .Values.image.name }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
           resources:
             {{- toYaml .Values.system.apps.resources | nindent 12 }}
-          command: [/{{ .Chart.Name }}]
+          command: [/konnector]
           env:
             - name: NAMESPACE
               valueFrom:

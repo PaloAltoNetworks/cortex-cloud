@@ -63,6 +63,7 @@ system:
   batch:
     backoffLimit: 4  # Maximum number of retries before the job is considered failed. After 4 attempts, the job will fail.
     ttlSecondsAfterFinished: 3600  # Time-to-live for completed jobs, jobs will be automatically deleted 3600 seconds (1 hour) after completion
+    name: "cortex-syncer"
     cleanupJob:
       resources:
         requests:
