@@ -38,9 +38,15 @@ app.kubernetes.io/author: {{ .Values.namespace.name }}
 {{- printf "%d */1 * * *" $minute -}}
 {{- end -}}
 
+{{- define "common.jobsHistoryLimit" -}}
+successfulJobsHistoryLimit: 1
+failedJobsHistoryLimit: 1
+{{- end -}}
+
 {{- define "common.jobTemplate" -}}
 spec:
   backoffLimit: {{ .Values.system.batch.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.system.batch.ttlSecondsAfterFinished }}
   template:
     metadata:
       labels:
@@ -55,15 +61,20 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.priorityClassValues.enabled }}
+      priorityClassName: {{ .Values.priorityClassValues.classes.high.name }}
+      {{- end }}
       volumes:
         - name: {{ .Values.system.secrets.backendAuth.name }}
           secret:
             secretName: {{ .Values.system.secrets.backendAuth.name }}
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       containers:
-        - name: {{ .Chart.Name }}
+        - name: {{ .Values.system.batch.name }}
           image: "{{ .Values.image.repository }}/{{ .Values.image.name }}{{- if .Values.image.tag }}:{{ .Values.image.tag }}{{- end }}{{- if .Values.image.digest }}@{{ .Values.image.digest }}{{- end }}"
-          command: [/{{ .Chart.Name }}]
+          resources:
+            {{- toYaml .Values.system.apps.resources | nindent 12 }}
+          command: [/konnector]
           env:
             - name: NAMESPACE
               valueFrom:
