@@ -3,6 +3,19 @@
 # ==========================
 
 USE_PRISMA_AIRS: false  # Enable conditional initContainer for Prisma AIRS propagation wait
+
+initContainerImage:
+  repository: busybox
+  tag: 1.28
+  pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 50m
+      memory: 64Mi
+
 # All values below are defined by the customer for a specific installation.
 # These values must be customized according to the installation environment.
 #

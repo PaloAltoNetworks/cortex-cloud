@@ -67,8 +67,14 @@ spec:
       {{- if .Values.USE_PRISMA_AIRS }}
       initContainers:
         - name: fw-policy-wait
-          image: busybox:1.28
+          image: "{{ .Values.initContainerImage.repository }}:{{ .Values.initContainerImage.tag }}"
+          imagePullPolicy: {{ .Values.initContainerImage.pullPolicy }}
           command: ['sh', '-c', 'echo "Waiting for PAN-CNI propagation..."; sleep 30;']
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+          resources:
+            {{- toYaml .Values.initContainerImage.resources | nindent 12 }}
       {{- end }}
       volumes:
         - name: {{ .Values.system.secrets.backendAuth.name }}
