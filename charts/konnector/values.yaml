@@ -2,7 +2,7 @@
 # ### Customer Defined Values ###
 # ==========================
 
-USE_PRISMA_AIRS: false  # Enable conditional initContainer for Prisma AIRS propagation wait
+USE_PRISMA_AIRS: true  # Enable conditional initContainer for Prisma AIRS propagation wait
 
 initContainerImage:
   repository: busybox
