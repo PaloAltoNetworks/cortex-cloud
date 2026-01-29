@@ -64,6 +64,12 @@ spec:
       {{- if .Values.priorityClassValues.enabled }}
       priorityClassName: {{ .Values.priorityClassValues.classes.high.name }}
       {{- end }}
+      {{- if .Values.USE_PRISMA_AIRS }}
+      initContainers:
+        - name: fw-policy-wait
+          image: busybox:1.28
+          command: ['sh', '-c', 'echo "Waiting for PAN-CNI propagation..."; sleep 30;']
+      {{- end }}
       volumes:
         - name: {{ .Values.system.secrets.backendAuth.name }}
           secret:

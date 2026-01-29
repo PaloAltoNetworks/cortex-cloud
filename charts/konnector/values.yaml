@@ -1,6 +1,8 @@
 # ==========================
 # ### Customer Defined Values ###
 # ==========================
+
+USE_PRISMA_AIRS: false  # Enable conditional initContainer for Prisma AIRS propagation wait
 # All values below are defined by the customer for a specific installation.
 # These values must be customized according to the installation environment.
 #
