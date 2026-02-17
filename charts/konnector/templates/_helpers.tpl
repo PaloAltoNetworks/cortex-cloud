@@ -144,3 +144,34 @@ Usage: {{ include "secret.valueOrExistingB64" (dict "existing" $existing "key" "
   {{- b64enc $seed | quote -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Backward compatibility: determine if dockerPullSecret should be created
+Supports both old string format and new structured format
+*/}}
+{{- define "dockerPullSecret.shouldCreate" -}}
+{{- if typeIs "map[string]interface {}" .Values.dockerPullSecret -}}
+  {{- if .Values.dockerPullSecret.create -}}
+    {{- "true" -}}
+  {{- else -}}
+    {{- "false" -}}
+  {{- end -}}
+{{- else -}}
+  {{- "true" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Backward compatibility: get dockerPullSecret data
+Supports both old string format and new structured format
+*/}}
+{{- define "dockerPullSecret.data" -}}
+{{- if typeIs "map[string]interface {}" .Values.dockerPullSecret -}}
+  {{- .Values.dockerPullSecret.data | default "" -}}
+{{- else if typeIs "string" .Values.dockerPullSecret -}}
+  {{- .Values.dockerPullSecret -}}
+{{- else -}}
+  {{- "" -}}
+{{- end -}}
+{{- end -}}
+

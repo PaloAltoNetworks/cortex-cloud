@@ -18,7 +18,13 @@ image:
 namespace:
   name: pan  # Kubernetes namespace where resources will be deployed
 
-dockerPullSecret: ""  # Secret for pulling images from a private registry
+# Docker Pull Secret Configuration
+# Set 'create: true' to have Helm create the secret (requires 'data' to be provided)
+# Set 'create: false' to skip creation (assumes secret will be provisioned externally)
+
+dockerPullSecret:
+  create: true  # Set to false if secret is managed externally
+  data: ""      # Base64-encoded Docker config JSON (only used if create: true)
 
 distribution:
   id: "default-distribution-id"  # Retrieve distribution ID from Palo Alto Networks systems during installation
