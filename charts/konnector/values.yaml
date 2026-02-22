@@ -267,3 +267,12 @@ system:
                   values:
                     - amd64
                     - arm64
+
+# ==========================
+# ### Testing Overrides ###
+# ==========================
+# Internal values used for unit testing only. Do NOT set in production.
+# When _testing.distributionChanged is set (true/false), it overrides the
+# runtime lookup-based detection of distribution ID changes.
+_testing:
+  distributionChanged: null
