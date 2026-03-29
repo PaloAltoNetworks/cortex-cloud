@@ -1138,6 +1138,10 @@ cmd_mirror() {
     jq_args+=(--arg secret "$docker_pull_secret_override")
     info "dockerPullSecret will be injected into cortex-override-values.yaml"
     log "dockerPullSecret override provided — will be injected into override values"
+  elif [[ "$no_pull_secret" == "true" ]]; then
+    jq_filter="${jq_filter} | del(.dockerPullSecret)"
+    info "dockerPullSecret will be excluded from cortex-override-values.yaml (--no-pull-secret)"
+    log "dockerPullSecret excluded from override values (--no-pull-secret)"
   fi
 
   jq "${jq_args[@]}" "$jq_filter" "$backend_values_json_tmp" | yq -P > "$cortex_override_values_file.tmp"
