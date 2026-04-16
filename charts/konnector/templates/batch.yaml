@@ -35,6 +35,8 @@ spec:
   backoffLimit: 0
   template:
     spec:
+      nodeSelector:
+        kubernetes.io/os: linux
       serviceAccountName: {{ .Values.system.serviceAccount.name }}
       restartPolicy: "Never"
       {{- if .Values.priorityClassValues.enabled }}

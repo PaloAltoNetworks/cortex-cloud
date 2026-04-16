@@ -53,6 +53,8 @@ spec:
         {{- include "common.labels" . | nindent 8 }}
         app.kubernetes.io/component: {{ .Release.Name }}
     spec:
+      nodeSelector:
+        kubernetes.io/os: linux
       {{- with .Values.system.apps.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
