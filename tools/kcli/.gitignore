@@ -1,0 +1,5 @@
+# Local scratch / build output
+cortex-mirror-output/
+tmp/
+*.log
+.DS_Store
