@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# values-example.yaml — minimal customer values file for `kcli mirror`.
+#
+# `kcli mirror` reads exactly three fields from this file (and writes
+# the first two back at the end of the run, pointed at the private
+# registry):
+#
+#   * global.imageRegistry     — source registry / repo path used for
+#                                every container image in the bundle
+#   * global.dockerPullSecret  — base64 Docker config to authenticate
+#                                against the source registry
+#   * global.metadata.env      — deployment environment, used to
+#                                resolve per-env image tags from the
+#                                chart's .image.tagsByEnv.<env> map
+#                                (e.g. cortex-agent ships only via
+#                                tagsByEnv). Valid values:
+#                                  dev | prod | fr | gov
+#
+# Everything else (the bundle version gate and the list of mirrorable
+# images, including each image's name and tag) comes from the chart
+# archive passed via --chart — the customer values file stays minimal
+# by design.
+#
+# These three fields come from the values bundle issued for your
+# tenant via the Cortex Cloud portal — copy them as-is.
+# ---------------------------------------------------------------------------
+
+global:
+  # Container image registry for all bundle images. kcli reads the host
+  # portion (everything before the first '/') and uses it for `docker login`.
+  imageRegistry: "us-docker.pkg.dev/cortex-konnector/konnector"
+
+  # Base64-encoded Docker config.json used to authenticate against the
+  # source registry. The portal-issued values file already contains this.
+  dockerPullSecret: "<base64-encoded-docker-config-json>"
+
+  # Deployment environment. Used by kcli to pick the matching tag from
+  # any chart image that ships only via .image.tagsByEnv (e.g.
+  # cortex-agent: tagsByEnv.{dev,prod,fr,gov}). Components without a
+  # matching env entry are reported as SKIPPED.
+  metadata:
+    env: "prod"   # one of: dev | prod | fr | gov
