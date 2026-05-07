@@ -247,11 +247,11 @@ system:
   apps:
     resources:
       requests:
-        cpu: 50m
-        memory: 50Mi
-      limits:
-        cpu: 150m
+        cpu: 100m
         memory: 200Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
     tolerations:
       - key: "kubernetes.io/arch"
         operator: "Equal"
