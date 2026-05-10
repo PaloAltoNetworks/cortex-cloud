@@ -23,6 +23,7 @@ dockerPullSecret: ""  # Secret for pulling images from a private registry
 distribution:
   id: "default-distribution-id"  # Retrieve distribution ID from Palo Alto Networks systems during installation
   url: "https://distributions.traps.paloaltonetworks.com"  # Retrieve distribution URL from Palo Alto Networks systems during installation
+  existingSecret: ""  # If set, skip creating the distribution-id secret and use this pre-existing secret name instead. The secret must contain key: distribution-id
 
 optionalValues:
   CLUSTER_URI: ""    # Cluster URI should be set when metadata service is not reachable from the cluster
@@ -33,6 +34,7 @@ optionalValues:
 proxyValues:
   httpProxy: ""  # Optional proxy URL for external network access
   noProxy: "kubernetes,kubernetes.default.svc,.svc,.cluster.local"  # List of addresses/domains that should bypass the proxy
+  existingSecret: ""  # If set, skip creating the konnector-proxy secret and use this pre-existing secret name instead. The secret must contain keys: httpProxy, noProxy
 
 priorityClassValues:
   enabled: true
@@ -237,9 +239,14 @@ system:
   # ==========================
   secrets:
     backendAuth:
-      name: backend-auth-secret  # Secret holding backend authentication credentials (e.g. API tokens)
+      name: backend-auth-secret  # Runtime secret — always created by chart, populated by konnector at runtime (e.g. API tokens). No existingSecret support.
     dockerSecret:
       name: konnector-docker-secret  # Secret for Docker credentials (e.g., for pulling private images)
+      existingSecret: ""  # If set, skip creating the docker pull secret and use this pre-existing secret name instead. The secret must be type kubernetes.io/dockerconfigjson and contain key: .dockerconfigjson
+    distributionId:
+      name: distribution-id  # Secret holding the distribution ID
+    proxy:
+      name: konnector-proxy  # Secret holding proxy configuration
 
   # ==========================
   # Apps Configurations

@@ -89,22 +89,22 @@ spec:
             - name: DISTRIBUTION_ID
               valueFrom:
                 secretKeyRef:
-                  name: distribution-id
+                  name: {{ include "secret.distributionIdName" . }}
                   key: distribution-id
             - name: HTTP_PROXY
               valueFrom:
                 secretKeyRef:
-                  name: konnector-proxy
+                  name: {{ include "secret.proxyName" . }}
                   key: httpProxy
             - name: HTTPS_PROXY
               valueFrom:
                 secretKeyRef:
-                  name: konnector-proxy
+                  name: {{ include "secret.proxyName" . }}
                   key: httpProxy
             - name: NO_PROXY
               valueFrom:
                 secretKeyRef:
-                  name: konnector-proxy
+                  name: {{ include "secret.proxyName" . }}
                   key: noProxy
           envFrom:
             - configMapRef:
@@ -145,4 +145,28 @@ Usage: {{ include "secret.valueOrExistingB64" (dict "existing" $existing "key" "
 {{- else -}}
   {{- b64enc $seed | quote -}}
 {{- end -}}
+{{- end -}}
+
+{{/*
+Resolve the effective secret name for the Docker pull secret.
+If existingSecret is set, use it; otherwise use the chart-managed name.
+*/}}
+{{- define "secret.dockerSecretName" -}}
+{{- .Values.system.secrets.dockerSecret.existingSecret | default .Values.system.secrets.dockerSecret.name -}}
+{{- end -}}
+
+{{/*
+Resolve the effective secret name for the distribution-id secret.
+If existingSecret is set, use it; otherwise use the chart-managed name.
+*/}}
+{{- define "secret.distributionIdName" -}}
+{{- .Values.distribution.existingSecret | default .Values.system.secrets.distributionId.name -}}
+{{- end -}}
+
+{{/*
+Resolve the effective secret name for the proxy secret.
+If existingSecret is set, use it; otherwise use the chart-managed name.
+*/}}
+{{- define "secret.proxyName" -}}
+{{- .Values.proxyValues.existingSecret | default .Values.system.secrets.proxy.name -}}
 {{- end -}}
