@@ -25,7 +25,7 @@ set -Eeuo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
-readonly VERSION="1.0.0"
+readonly VERSION="1.1.0"
 readonly PROGRAM_NAME="kcli"
 
 # Minimum supported konnector bundle major version. The mirror flow relies
@@ -33,6 +33,20 @@ readonly PROGRAM_NAME="kcli"
 # metadata under bundle.<comp>.image, gated via global.version >= 2).
 # Older bundles use a different layout and are not supported here.
 readonly MIN_BUNDLE_MAJOR=2
+
+# OCI sub-path (appended to the FULL global.imageRegistry value, i.e.
+# host + GCP project + repo) where the konnector Helm chart is
+# published. When the operator uses --chart-version (instead of
+# supplying a local --chart .tgz file), kcli pulls the chart from
+#     oci://<global.imageRegistry>/${CHART_OCI_PATH}
+# at the given version. Example: with
+#     global.imageRegistry: us-central1-docker.pkg.dev/<proj>/<repo>
+# the chart reference becomes
+#     oci://us-central1-docker.pkg.dev/<proj>/<repo>/helm/konnector-bundle
+# This sub-path is a fixed contract of the konnector publish pipeline —
+# the same for every tenant — so kcli intentionally hard-codes it
+# rather than exposing yet another CLI flag.
+readonly CHART_OCI_PATH="helm/konnector-bundle"
 
 # Where temporary scratch files live. Honor TMPDIR if set.
 readonly TMP_ROOT="${TMPDIR:-/tmp}"
@@ -198,6 +212,53 @@ yq_or_empty() {
   printf '%s' "$value"
 }
 
+# resolve_env <chart-values-yaml> <operator-values-yaml>
+# Resolves the deployment environment used to pick per-env image tags
+# (.image.tagsByEnv.<env>). Mirrors Helm's "merge" semantics: a value
+# supplied in the operator's --values file overrides the chart default,
+# but if the operator did not set .global.metadata.env we fall back to
+# whatever the chart ships with in its own values.yaml. Echoes just the
+# env string (possibly empty when neither source provides a value).
+#
+# Callers that need to know WHERE the value came from (for user-facing
+# logging) should use resolve_env_with_source instead.
+resolve_env() {
+  local env _src
+  IFS='|' read -r env _src < <(resolve_env_with_source "$1" "$2")
+  printf '%s' "$env"
+}
+
+# resolve_env_with_source <chart-values-yaml> <operator-values-yaml>
+# Same precedence as resolve_env, but echoes "<env>|<source>" where
+# <source> is "--values", "chart values.yaml", or "none" (when neither
+# file provided a value). Single helper keeps the precedence rule in
+# exactly one place — see Bug 5 in the kcli code review.
+#
+# Delimiter is '|' — safe because env is constrained to {dev,prod,fr,gov}
+# per the values-file schema (see mirror_usage). If that ever changes to
+# allow arbitrary strings, switch to a byte that cannot appear in env
+# (e.g. $'\x1f' US, or just use two separate calls).
+resolve_env_with_source() {
+  local chart_values_yaml="$1" operator_values_yaml="$2" env src
+  env=$(yq_or_empty '.global.metadata.env' "$operator_values_yaml")
+  if [[ -n "$env" ]]; then
+    src="--values"
+  else
+    env=$(yq_or_empty '.global.metadata.env' "$chart_values_yaml")
+    if [[ -n "$env" ]]; then
+      src="chart values.yaml"
+    else
+      src="none"
+    fi
+  fi
+  # MUST end with a newline: callers consume this via
+  #   IFS='|' read -r env src < <(resolve_env_with_source …)
+  # and `read` returns non-zero (EOF without newline) when the input is
+  # newline-less. Under `set -Eeuo pipefail` that non-zero status aborts
+  # the whole script — see commit history if tempted to drop the \n.
+  printf '%s|%s\n' "$env" "$src"
+}
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Usage strings
@@ -245,7 +306,13 @@ Pull all bundle container images from the source registry and push them
 to a private registry, preserving multi-arch manifests.
 
 Workflow:
-  1. Extracts the chart archive (--chart) and reads:
+  1. Resolves the chart archive (one of):
+       - --chart <chart.tgz>       use a locally-downloaded archive, OR
+       - --chart-version <version> pull the chart directly from the source
+                                   OCI registry
+                                   (oci://<global.imageRegistry>/${CHART_OCI_PATH})
+                                   using the credentials in --values.
+     Then reads:
        - Chart.yaml      → bundle version (must be major >= ${MIN_BUNDLE_MAJOR})
        - values.yaml     → global.bundle.<comp>.image entries (the
                            authoritative list of mirrorable images)
@@ -258,12 +325,21 @@ Workflow:
      timestamped .bak copy is written next to the file before any change.
 
 ${BOLD}Usage:${NC}
-  ${PROGRAM_NAME} mirror --chart <chart.tgz> --values <values-file> \\
-                  --private-registry <registry> [options]
+  ${PROGRAM_NAME} mirror (--chart <chart.tgz> | --chart-version <version>) \\
+                  --values <values-file> --private-registry <registry> \\
+                  [options]
 
 ${BOLD}Required:${NC}
   --chart <chart.tgz>              Path to the konnector Helm chart archive
-                                   (the .tgz issued for your tenant)
+                                   (mutually exclusive with --chart-version)
+  --chart-version <version>        Pull the konnector chart from the source
+                                   OCI registry at this version, e.g. 2.0.0.
+                                   The OCI reference is fixed:
+                                     oci://<global.imageRegistry>/${CHART_OCI_PATH}
+                                   where <global.imageRegistry> comes from
+                                   --values (host + GCP project + repo).
+                                   Requires 'helm' (mutually exclusive with
+                                   --chart).
   --values <values-file>           Helm values YAML for your tenant.
                                    See ${BOLD}VALUES FILE SCHEMA${NC} below for the
                                    exact fields ${PROGRAM_NAME} reads and writes.
@@ -332,14 +408,23 @@ ${BOLD}VALUES FILE SCHEMA (--values):${NC}
   in the repo for a fully-commented template.
 
 ${BOLD}Examples:${NC}
+  # Pull the chart directly from the source OCI registry (recommended).
+  ${PROGRAM_NAME} mirror \\
+    --chart-version 2.0.0 \\
+    --values my-values.yaml \\
+    --private-registry myregistry.azurecr.io/cortex \\
+    --docker-pull-secret-file ~/.docker/config.json
+
+  # Use a locally-downloaded chart archive.
   ${PROGRAM_NAME} mirror \\
     --chart ./konnector-2.0.0.tgz \\
     --values my-values.yaml \\
     --private-registry myregistry.azurecr.io/cortex \\
     --docker-pull-secret-file ~/.docker/config.json
 
+  # Dry run — preview without pulling, pushing, or rewriting.
   ${PROGRAM_NAME} mirror \\
-    --chart ./konnector-2.0.0.tgz \\
+    --chart-version 2.0.0 \\
     --values my-values.yaml \\
     --private-registry myregistry.azurecr.io/cortex \\
     --dry-run
@@ -548,6 +633,28 @@ validate_registry() {
   log "Registry validated: $registry"
 }
 
+# validate_chart_version <version-string>
+# Allow-lists --chart-version values to a conservative SemVer-ish form
+# before we hand them to `helm pull --version`. Accepts:
+#   2, 2.0, 2.0.0, v2.0.0, 2.0.0-rc1, 2.0.0+build.5
+# Rejects anything containing shell metacharacters, leading dashes
+# (which would be parsed as helm flags), or whitespace. helm itself
+# would ultimately reject most bad input, but failing here keeps the
+# error close to the offending flag and avoids invoking helm at all.
+validate_chart_version() {
+  local v="$1"
+  if [[ -z "$v" ]]; then
+    error "--chart-version value cannot be empty."
+    exit 1
+  fi
+  if [[ ! "$v" =~ ^v?[0-9]+(\.[0-9]+){0,2}([-+][A-Za-z0-9.+-]+)?$ ]]; then
+    error "Invalid --chart-version value: '$v'"
+    error "Expected a SemVer-like version, e.g. 2.0.0, v2.0.0, or 2.0.0-rc1."
+    exit 1
+  fi
+  log "Chart version validated: $v"
+}
+
 # parse_major_version <version-string>
 # Extracts the integer major-version component from a string such as
 # "2.1.0", "v2.1.0-rc1", or "v3". Echoes the integer on success;
@@ -746,6 +853,110 @@ login_to_source_registry() {
   fi
 }
 
+# pull_chart_from_oci <chart-version> <dest-dir>
+# Downloads the konnector Helm chart from the source GAR registry as an
+# OCI artifact and echoes the path to the resulting .tgz file. Requires
+# extract_credentials_from_values to have already populated
+# $image_repository / $registry_host / $sa_json_key — i.e. it must be
+# called AFTER the source-registry credentials have been parsed from the
+# --values file.
+#
+# The chart's OCI reference is built by appending CHART_OCI_PATH to the
+# FULL imageRegistry value (host + GCP project + repo), e.g.
+#     global.imageRegistry: us-central1-docker.pkg.dev/<proj>/<repo>
+#     → oci://us-central1-docker.pkg.dev/<proj>/<repo>/helm/konnector-bundle
+# The registry HOST (the part before the first '/') is what we feed to
+# `helm registry login` — Docker / OCI credentials are scoped per-host.
+#
+# helm's OCI flow uses Docker-style credentials. We push the GAR service
+# account key through `helm registry login --password-stdin` so the pull
+# works even when the operator has not interactively logged in. On any
+# failure we surface helm's own stderr so the operator sees the real
+# upstream error (auth, 404, network, etc.) instead of a generic message.
+#
+# IMPORTANT: this function's stdout is captured by the caller (the only
+# thing it should print to stdout is the final pulled-tgz path). All
+# progress logging therefore goes through info/ok/warn redirected to
+# STDERR so it never pollutes the captured path. Same convention used
+# by pull_image_multiarch.
+pull_chart_from_oci() {
+  local chart_version="$1" dest_dir="$2"
+  local oci_ref="oci://${image_repository}/${CHART_OCI_PATH}"
+
+  if [[ -z "$image_repository" || -z "$registry_host" ]]; then
+    error "Cannot pull chart: global.imageRegistry is empty or malformed."
+    error "Ensure global.imageRegistry is set in --values."
+    exit 1
+  fi
+
+  if [[ -z "$sa_json_key" ]]; then
+    error "Cannot pull chart from $oci_ref: no service-account key available."
+    error "global.dockerPullSecret must be present in --values when using --chart-version."
+    exit 1
+  fi
+
+  info "Pulling chart $oci_ref (version $chart_version) into $dest_dir …" >&2
+  log  "helm pull $oci_ref --version $chart_version"
+
+  # helm registry login is idempotent — re-running with the same creds is
+  # a no-op. The `2>&1 >/dev/null` ordering is intentional: it sends
+  # stderr to the captured stream and discards stdout, so $login_err
+  # holds helm's diagnostic output. Do NOT "simplify" to `>/dev/null 2>&1`
+  # — that would swallow the message we want to surface on failure.
+  local login_err
+  login_err=$(echo "$sa_json_key" | helm registry login "$registry_host" \
+                --username _json_key --password-stdin 2>&1 >/dev/null) || {
+    error "helm registry login to $registry_host failed:"
+    error "  $login_err"
+    error "Check that global.dockerPullSecret in --values is valid."
+    exit 1
+  }
+  ok "helm registry login to $registry_host succeeded." >&2
+  # Some helm versions print a deprecation/insecure-password warning to
+  # stderr even on success — relay it so operators aren't surprised.
+  [[ -n "$login_err" ]] && warn "helm registry login: $login_err" >&2
+
+  # `helm pull` writes <chart-name>-<version>.tgz into --destination.
+  # We don't assume the filename — we glob the destination after the
+  # pull to find the single .tgz that was produced. Capture stderr so
+  # helm's own diagnostic (404, auth, etc.) reaches the operator.
+  local pull_err
+  pull_err=$(helm pull "$oci_ref" --version "$chart_version" \
+               --destination "$dest_dir" 2>&1 >/dev/null) || {
+    error "helm pull failed for $oci_ref (version $chart_version):"
+    while IFS= read -r line; do error "  $line"; done <<<"$pull_err"
+    error "Verify that the chart version exists at the OCI reference above,"
+    error "and that global.dockerPullSecret in --values grants read access."
+    exit 1
+  }
+
+  # Glob for the produced .tgz. We expect exactly one — dest_dir is a
+  # fresh per-invocation mktemp so any other count means something is
+  # wrong (helm wrote nothing, or someone reused the dir). Bail rather
+  # than guess which file the caller wanted.
+  local -a pulled_tgzs=()
+  while IFS= read -r -d '' f; do
+    pulled_tgzs+=("$f")
+  done < <(find "$dest_dir" -maxdepth 1 -type f -name '*.tgz' -print0 2>/dev/null)
+
+  if (( ${#pulled_tgzs[@]} == 0 )); then
+    error "helm pull reported success but no .tgz was found in $dest_dir."
+    exit 1
+  fi
+  if (( ${#pulled_tgzs[@]} > 1 )); then
+    error "helm pull produced ${#pulled_tgzs[@]} .tgz files in $dest_dir (expected 1):"
+    local t
+    for t in "${pulled_tgzs[@]}"; do error "  $t"; done
+    exit 1
+  fi
+  local pulled="${pulled_tgzs[0]}"
+
+  ok  "Pulled chart: $pulled" >&2
+  log "Pulled chart: $pulled"
+  # Only the path goes to stdout — the caller captures this value.
+  printf '%s\n' "$pulled"
+}
+
 # ensure_target_registry_login <target-host>
 # Fast-paths when credentials are already in the Docker config; otherwise
 # triggers an interactive `docker login`. Skipped entirely in dry-run
@@ -790,7 +1001,8 @@ ensure_target_registry_login() {
 #
 # Tag resolution per component, in order:
 #   1. .image.tag
-#   2. .image.tagsByEnv[<global.metadata.env from --values>]
+#   2. .image.tagsByEnv[<global.metadata.env from --values, falling back
+#      to the chart's values.yaml when the operator did not override it>]
 #   3. empty string  → component is reported as SKIPPED (no tag)
 #
 # A component appears in the output iff the chart defines a non-empty
@@ -800,7 +1012,7 @@ build_bundle_image_list() {
   local chart_values_json env
 
   chart_values_json=$(yq -o=json '.' "$chart_values_yaml")
-  env=$(yq_or_empty '.global.metadata.env' "$values_yaml")
+  env=$(resolve_env "$chart_values_yaml" "$values_yaml")
 
   jq -n \
     --argjson chart "$chart_values_json" \
@@ -1183,7 +1395,7 @@ print_completion_summary() {
 # Heavy lifting is delegated to single-purpose helpers above.
 cmd_mirror() {
   # ─── 1. Parse arguments ────────────────────────────────────────────────
-  local chart_tgz_file="" values_file="" push_target=""
+  local chart_tgz_file="" chart_version="" values_file="" push_target=""
   local docker_pull_secret_override=""
   local no_pull_secret=false
   local dry_run=false
@@ -1193,6 +1405,10 @@ cmd_mirror() {
       --chart)
         require_arg "--chart" "${2:-}"
         chart_tgz_file="$2"; shift 2
+        ;;
+      --chart-version)
+        require_arg "--chart-version" "${2:-}"
+        chart_version="$2"; shift 2
         ;;
       --values)
         require_arg "--values" "${2:-}"
@@ -1234,22 +1450,36 @@ cmd_mirror() {
   done
 
   # ─── 2. Validate required arguments ───────────────────────────────────
-  [[ -z "$chart_tgz_file" ]] && { error "Missing required flag: --chart <chart.tgz>";          echo ""; mirror_usage; exit 64; }
+  # Exactly one of --chart / --chart-version must be supplied.
+  if [[ -n "$chart_tgz_file" && -n "$chart_version" ]]; then
+    error "--chart and --chart-version are mutually exclusive — pick one."
+    echo ""; mirror_usage; exit 64
+  fi
+  if [[ -z "$chart_tgz_file" && -z "$chart_version" ]]; then
+    error "Missing required flag: --chart <chart.tgz> OR --chart-version <version>"
+    echo ""; mirror_usage; exit 64
+  fi
+
   [[ -z "$values_file"    ]] && { error "Missing required flag: --values <values-file>";       echo ""; mirror_usage; exit 64; }
   [[ -z "$push_target"    ]] && { error "Missing required flag: --private-registry <registry>"; echo ""; mirror_usage; exit 64; }
 
-  if [[ ! -f "$chart_tgz_file" ]]; then error "Chart archive not found: $chart_tgz_file"; exit 1; fi
+  if [[ -n "$chart_tgz_file" && ! -f "$chart_tgz_file" ]]; then
+    error "Chart archive not found: $chart_tgz_file"; exit 1
+  fi
   if [[ ! -f "$values_file"    ]]; then error "Values file not found: $values_file";      exit 1; fi
 
-  case "$chart_tgz_file" in
-    *.tgz|*.tar.gz) : ;;
-    *)
-      error "--chart must point to a .tgz or .tar.gz Helm chart archive: $chart_tgz_file"
-      exit 1
-      ;;
-  esac
+  if [[ -n "$chart_tgz_file" ]]; then
+    case "$chart_tgz_file" in
+      *.tgz|*.tar.gz) : ;;
+      *)
+        error "--chart must point to a .tgz or .tar.gz Helm chart archive: $chart_tgz_file"
+        exit 1
+        ;;
+    esac
+  fi
 
   validate_registry "$push_target"
+  [[ -n "$chart_version" ]] && validate_chart_version "$chart_version"
 
   # Mirroring without a pull-secret strategy is almost never what the user
   # wants — fail loudly unless they explicitly opted out.
@@ -1267,7 +1497,13 @@ cmd_mirror() {
   fi
 
   # ─── 3. Check prerequisites ───────────────────────────────────────────
-  check_prerequisites docker base64 yq jq curl tar
+  # helm is only required for the --chart-version path (OCI pull). Operators
+  # using --chart <local.tgz> should not need a helm install just to mirror,
+  # so we build the prereq list dynamically and report everything missing
+  # in a single error.
+  local -a prereqs=(docker base64 yq jq curl tar)
+  [[ -n "$chart_version" ]] && prereqs+=(helm)
+  check_prerequisites "${prereqs[@]}"
   if ! docker buildx version &>/dev/null; then
     error "'docker buildx' is required for pushing multi-arch manifests."
     error "Install it: https://docs.docker.com/buildx/install/"
@@ -1276,13 +1512,21 @@ cmd_mirror() {
 
   # ─── 4. Init logging + banner ─────────────────────────────────────────
   init_log_file
-  log "Chart:       $chart_tgz_file"
+  if [[ -n "$chart_tgz_file" ]]; then
+    log "Chart (local):   $chart_tgz_file"
+  else
+    log "Chart (OCI):     version $chart_version (pulled from source registry)"
+  fi
   log "Values file: $values_file"
   log "Push target: $push_target"
   log "Dry run:     $dry_run"
 
   print_banner "${PROGRAM_NAME} — image mirror"
-  info "Chart:         $chart_tgz_file"
+  if [[ -n "$chart_tgz_file" ]]; then
+    info "Chart:         $chart_tgz_file"
+  else
+    info "Chart:         version $chart_version (will be pulled from source registry)"
+  fi
   info "Push target:   $push_target"
   info "Values file:   $values_file"
   if [[ "$dry_run" == "true" ]]; then
@@ -1295,10 +1539,22 @@ cmd_mirror() {
   extract_credentials_from_values "$values_file"
   login_to_source_registry
 
+  # ─── 5b. Resolve chart archive (pull from OCI if --chart-version) ────
+  # When the operator passed --chart-version we use the source-registry
+  # credentials we just decoded to pull the konnector chart directly from
+  # GAR. The chart is stored in a temp dir registered for cleanup, so
+  # nothing is left on disk after the run.
+  local chart_extract_dir chart_values_yaml chart_yaml
+  if [[ -z "$chart_tgz_file" ]]; then
+    local chart_pull_dir
+    chart_pull_dir=$(mktemp -d "${TMP_ROOT}/${PROGRAM_NAME}-chart-pull-XXXXXX")
+    register_temp_dir "$chart_pull_dir"
+    chart_tgz_file=$(pull_chart_from_oci "$chart_version" "$chart_pull_dir")
+  fi
+
   # ─── 6. Build image list & pull ──────────────────────────────────────
   info "Step 2/3: Pulling bundle images…"
 
-  local chart_extract_dir chart_values_yaml chart_yaml
   chart_extract_dir=$(mktemp -d "${TMP_ROOT}/${PROGRAM_NAME}-chart-values-XXXXXX")
   register_temp_dir "$chart_extract_dir"
   if ! tar -xzf "$chart_tgz_file" -C "$chart_extract_dir" 2>/dev/null; then
@@ -1328,15 +1584,19 @@ cmd_mirror() {
   check_bundle_version "$chart_yaml"
 
   # Surface the resolved env so operators can see which tagsByEnv
-  # branch the per-env images will pick up (e.g. cortex-agent).
-  local resolved_env
-  resolved_env=$(yq_or_empty '.global.metadata.env' "$values_file")
+  # branch the per-env images will pick up (e.g. cortex-agent). The
+  # precedence rule (--values > chart default > none) lives in exactly
+  # one place — resolve_env_with_source — so this block and
+  # build_bundle_image_list cannot drift apart.
+  local resolved_env resolved_env_source
+  IFS='|' read -r resolved_env resolved_env_source \
+    < <(resolve_env_with_source "$chart_values_yaml" "$values_file")
   if [[ -n "$resolved_env" ]]; then
-    info "Resolved env from --values .global.metadata.env: $resolved_env"
-    log  "Resolved env: $resolved_env"
+    info "Resolved env from ${resolved_env_source} .global.metadata.env: $resolved_env"
+    log  "Resolved env: $resolved_env (source: ${resolved_env_source})"
   else
-    warn "No .global.metadata.env in --values; per-env images (.image.tagsByEnv)"
-    warn "will be skipped. Set 'global.metadata.env: <dev|prod|fr|gov>' to mirror them."
+    warn "No .global.metadata.env in --values or chart values.yaml; per-env images"
+    warn "(.image.tagsByEnv) will be skipped. Set 'global.metadata.env: <dev|prod|fr|gov>' to mirror them."
   fi
 
   local images_json image_count

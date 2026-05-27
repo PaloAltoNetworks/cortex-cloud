@@ -34,9 +34,3 @@ global:
   # source registry. The portal-issued values file already contains this.
   dockerPullSecret: "<base64-encoded-docker-config-json>"
 
-  # Deployment environment. Used by kcli to pick the matching tag from
-  # any chart image that ships only via .image.tagsByEnv (e.g.
-  # cortex-agent: tagsByEnv.{dev,prod,fr,gov}). Components without a
-  # matching env entry are reported as SKIPPED.
-  metadata:
-    env: "prod"   # one of: dev | prod | fr | gov

@@ -1,542 +1,355 @@
-# kcli
+# Cortex Cloud Konnector — Image Mirroring CLI (`kcli`)
 
-> Cortex Cloud konnector CLI — currently focused on **mirroring konnector
-> container images** to a private container registry.
+`kcli mirror` does three things, in order:
 
-`kcli` is a small, focused command-line tool for operating the Palo Alto
-Networks Cortex Cloud konnector Helm chart in **air-gapped or
-private-registry** environments.
+1. **Pulls** every konnector image from the Cortex source registry (multi-arch).
+2. **Pushes** them to your private registry.
+3. **Rewrites** your `values.yaml` in place (with a timestamped `.bak`) so the chart points at the mirror.
 
-The first (and currently only) subcommand is `kcli mirror`. Given the
-konnector Helm chart archive (`.tgz`, bundle v2+) and the operator's
-Helm values file, it will:
-
-1. Verify the chart advertises a supported konnector bundle version
-   (`Chart.yaml` `version` major `>= 2`; `appVersion` is used as a
-   fallback when `version` is missing).
-2. Pull every container image declared by the chart under
-   `global.bundle.<comp>.image` from the source registry, preserving
-   multi-arch manifests.
-3. Re-push them into a private container registry of your choice.
-4. **Rewrite the operator's `--values` file in place** so it points the
-   chart at the mirrored registry — setting `global.imageRegistry`, any
-   per-component `global.bundle.<comp>.image.repository` overrides that
-   already exist, and (optionally) `global.dockerPullSecret`. A
-   timestamped `.bak` copy of the original file is written next to it
-   before any change.
-
-The mirroring logic is functionally equivalent to the
-`cortex-installer mirror` subcommand on the
-[`standalone-installer`](https://github.com/PaloAltoNetworks/cortex-cloud/tree/standalone-installer)
-branch, packaged with a CLI structure modelled after
-[PaloAltoNetworks/ktool](https://github.com/PaloAltoNetworks/ktool/blob/main/kubectl-ktool.sh)
-(subcommand dispatcher, dedicated `version` command, semver
-`parse_major_version` helper).
-
-> 🔧 **Installation of the chart itself is not in scope for this tool.**
-> After `kcli mirror` finishes, follow the installation instructions for
-> your tenant in the **Cortex Cloud portal** — the portal is the
-> single source of truth for the canonical install flow.
+That's it. You then run the portal's unchanged `helm upgrade --install` against the rewritten file. `kcli` never runs `helm install` itself — the portal command stays the source of truth for release name, namespace, and tenant flags, and is frequently delivered through GitOps (Argo CD, Flux).
 
 ---
 
-## Table of contents
+## Quick Start
 
-- [Why this tool?](#why-this-tool)
-- [Bundle compatibility](#bundle-compatibility)
-- [How it works](#how-it-works)
+```bash
+# 1. In the Cortex portal, download values.yaml + auth.json. Do NOT run the
+#    portal's "helm registry login + helm upgrade --install" block yet.
+
+# 2. Log in to your private (target) registry.
+docker login myregistry.azurecr.io
+
+# 3. Mirror images and rewrite values.yaml in place.
+kcli mirror \
+  --chart-version 2.0.0 \
+  --values ./values.yaml \
+  --private-registry myregistry.azurecr.io/cortex \
+  --docker-pull-secret-file ./pull-secret.dockerconfigjson
+
+# 4. Run the portal's `helm registry login && helm upgrade --install` block,
+#    unchanged, against the rewritten values.yaml.
+```
+
+Need a kubelet-compatible `pull-secret.dockerconfigjson`? See [Pull Secrets](#pull-secrets-what-kubelet-accepts) — this is the #1 source of `ImagePullBackOff` and you should read it before step 3.
+
+---
+
+## Table of Contents
+
+- [How `kcli` fits with the portal install wizard](#how-kcli-fits-with-the-portal-install-wizard)
 - [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Staying current (mandatory version check)](#staying-current-mandatory-version-check)
-- [Commands](#commands)
-  - [`kcli mirror`](#kcli-mirror)
-  - [`kcli version`](#kcli-version)
-  - [`kcli help`](#kcli-help)
-- [Inputs](#inputs)
-- [`dockerPullSecret` semantics](#dockerpullsecret-semantics)
-- [What `kcli mirror` writes](#what-kcli-mirror-writes)
-- [Environment variables](#environment-variables)
-- [Exit codes](#exit-codes)
-- [Logging & diagnostics](#logging--diagnostics)
-- [Security notes](#security-notes)
+- [Install](#install)
+- [Usage](#usage)
+  - [Step 1 — Download the values file](#step-1--download-the-values-file)
+  - [Step 2 — Mirror images](#step-2--mirror-images)
+  - [Step 3 — Install the konnector](#step-3--install-the-konnector)
+- [Pull Secrets: What `kubelet` Accepts](#pull-secrets-what-kubelet-accepts)
+- [Command Reference](#command-reference)
+- [What `kcli` does NOT do](#what-kcli-does-not-do)
+- [Staying Current](#staying-current)
+- [Troubleshooting](#troubleshooting)
+- [Examples](#examples)
 - [License](#license)
 
 ---
 
-## Why this tool?
+## How `kcli` fits with the portal install wizard
 
-The default konnector install pulls images directly from the Palo Alto
-Networks distribution registry. In environments where worker nodes cannot
-reach the public internet — or where customer policy mandates that all
-container images live in an internal registry — operators need to:
+The Cortex Cloud portal's Kubernetes connect wizard has two sections: **(a)** **Download Configuration Files** (`values.yaml` + `auth.json`), and **(b)** **Run Installation Commands** (a single block pairing `helm registry login` with `helm upgrade --install`).
 
-1. Discover **which images** the chart needs for the customer's bundle
-   subscription.
-2. Pull every image (across all supported architectures).
-3. Re-push them into a private registry under stable tags.
-4. Patch the chart's `global.imageRegistry` (and any per-component
-   overrides) so pods pull from the new location.
-5. Update `global.dockerPullSecret` so Kubernetes nodes can authenticate
-   to the private registry.
+`kcli` slots in between **(a)** and **(b)**:
 
-`kcli mirror` automates steps 1–5. The end-state is the operator's same
-`--values` file, mutated in place to point at the mirrored registry, ready
-to be passed straight into the chart install (per the Cortex Cloud portal
-flow).
+| Step | Where it runs | What you do |
+|------|---------------|-------------|
+| 1. Portal wizard, section (a) | Workstation | Download `values.yaml` / `auth.json` from the portal. **Stop there** — don't run the install commands yet. |
+| 2. `kcli mirror` | Workstation with access to both registries | Mirror images to your private registry and rewrite `values.yaml` in place. |
+| 3. Portal wizard, section (b) | Cluster admin host (or GitOps) | Run the wizard's `helm registry login` + `helm upgrade --install` block, **unchanged**, against the rewritten values file. |
 
----
-
-## Bundle compatibility
-
-This tool supports konnector **bundle v2 or higher** only. The version
-gate is read from the chart archive's `Chart.yaml`:
-
-```yaml
-# inside the .tgz: konnector-bundle/Chart.yaml
-apiVersion: v2
-name: konnector-bundle
-version: 2.0.41        # ← bundle version gate; major must be >= 2
-appVersion: v2.0.41    # fallback if 'version' is absent
-```
-
-The customer **values file** (`--values`) stays minimal — it supplies
-the source registry, the source-registry pull secret, and the
-deployment environment used to resolve per-env image tags:
-
-```yaml
-global:
-  imageRegistry: "us-docker.pkg.dev/cortex-konnector/konnector"
-  dockerPullSecret: "<base64-encoded-docker-config-json>"
-  metadata:
-    env: "prod"   # one of: dev | prod | fr | gov
-```
-
-The list of mirrorable images is read from the chart's own `values.yaml`
-under `global.bundle.<comp>.image` — every component the chart knows
-about is mirrored. Components whose tag is provided per-env (e.g.
-`cortex-agent` ships as `image.tagsByEnv.{dev,prod,fr,gov}` instead of
-a static `image.tag`) are resolved against `global.metadata.env`.
-
-`kcli mirror` reads:
-
-| What                            | Path                                                                |
-|---------------------------------|---------------------------------------------------------------------|
-| Bundle version (gate)           | `version` (with `appVersion` fallback) from chart `Chart.yaml`      |
-| Source registry / repo path     | `global.imageRegistry` (from `--values`)                            |
-| Source-registry pull credentials| `global.dockerPullSecret` (from `--values`)                         |
-| Deployment env (per-env tags)   | `global.metadata.env` (from `--values`) — `dev`/`prod`/`fr`/`gov`   |
-| Mirrorable image catalog        | `global.bundle.<comp>.image` (from chart `values.yaml`)             |
-
-…and **rewrites** the operator's `--values` file in place:
-`global.imageRegistry` and any per-component
-`global.bundle.<comp>.image.repository` overrides that already exist are
-pointed at the mirror, plus `global.dockerPullSecret` is set/removed per
-the CLI flags.
-
-Older bundles are **not supported** by this mirror flow — `kcli mirror`
-exits with exit code `1` and a clear error message before any registry
-traffic happens:
-
-```text
-[ERROR] Unsupported bundle version: chart version = '1.5.0' (major=1).
-[ERROR] The mirror flow requires konnector bundle v2 or higher.
-[ERROR] Please upgrade to a v2+ bundle and retry.
-```
-
-The version-parsing helper (`parse_major_version`) follows the same
-convention as
-[ktool](https://github.com/PaloAltoNetworks/ktool/blob/main/kubectl-ktool.sh):
-a leading `v` is optional and pre-release/build metadata is ignored.
-
----
-
-## How it works
-
-```
-┌──────────────────────────┐     ┌─────────────────────────────────────┐
-│  --chart  <chart.tgz>    │     │  Source container registry          │
-│  --values <values.yaml>  │ ──► │  (defined by global.imageRegistry   │
-│   (global.bundle.*       │     │   in --values; auth via             │
-│    declares enabled      │     │   global.dockerPullSecret)          │
-│    components)           │     └────────────────┬────────────────────┘
-└──────────────────────────┘                      │ docker pull (multi-arch)
-                                                  ▼
-                                  ┌──────────────────────────────────────┐
-                                  │  Local Docker daemon                 │
-                                  └────────────────┬─────────────────────┘
-                                                   │ buildx imagetools create
-                                                   ▼
-                                  ┌──────────────────────────────────────┐
-                                  │  --private-registry                  │
-                                  └──────────────────────────────────────┘
-
-In-place edit:
-  --values <file>  →  global.imageRegistry        := <push-target>
-                      global.bundle[*].image.repository (where present)
-                                                  := <push-target>
-                      global.dockerPullSecret     := <secret>  (if provided)
-                      <file>.bak.<UTC-timestamp>  ← byte-for-byte original
-```
+> `kcli mirror` handles the **source-registry** login itself, using credentials already inside `values.yaml`. You do not need to run the wizard's `helm registry login` before mirroring — only before the install in Step 3.
 
 ---
 
 ## Prerequisites
 
-| Tool             | Minimum version | Why                                          |
-|------------------|-----------------|----------------------------------------------|
-| `bash`           | 4.0             | Arrays, `[[ … ]]`, traps                     |
-| `docker`         | 20.10           | Image pull/push                              |
-| `docker buildx`  | bundled         | Multi-arch manifest copy                     |
-| `curl`           | any             | Mandatory upstream-version check (skipped if absent) |
-| `jq`             | 1.6             | JSON manipulation                            |
-| `yq`             | 4.x (mikefarah) | YAML manipulation (the **Go** version)       |
-| `tar`            | any             | Chart-archive extraction                     |
-| `base64`         | GNU or BSD      | Decoding the dockerPullSecret                |
+| Tool | Minimum Version | Purpose |
+|------|-----------------|---------|
+| **bash** | 4.0+ | Script runtime (see macOS note below) |
+| **docker** | 20.10+ with `buildx` | Pull/push multi-arch images |
+| **yq** | v4 (mikefarah/yq) | YAML processing |
+| **jq** | 1.6+ | JSON processing |
+| **curl** | any recent | Chart download + version check |
+| **helm** | 3.8+ | Pull the chart from the source OCI registry (only with `--chart-version`) |
+| `tar`, `base64` | POSIX | Bundled with every supported OS |
 
-The tool detects missing prerequisites and prints actionable error messages
-before doing any work.
+> **macOS ships bash 3.2.** Install a newer one with `brew install bash` — no shell change needed; `kcli`'s `/usr/bin/env bash` shebang will pick up Homebrew's bash if it's first on `PATH`.
 
-> ⚠️ **Note:** the python `yq` (`pip install yq`) is **not** compatible —
-> install the Go binary from <https://github.com/mikefarah/yq>.
+> **yq must be the Go-based mikefarah/yq**, not the Python one. Check with `yq --version`.
+
+> The machine running `kcli` needs access to both the Cortex source registry and your private registry. The cluster only needs access to your private registry.
+
+> `kcli mirror` requires **konnector bundle v2 or higher**. Older bundles are rejected up front.
+
+> Air-gapped? Set `KCLI_SKIP_VERSION_CHECK=1` to skip the upstream version check (see [Staying Current](#staying-current)).
 
 ---
 
-## Installation
+## Install
 
-`kcli` is a single self-contained bash script. There are no release
-artifacts — the canonical copy lives at `tools/kcli/kcli` on the
-`main` branch of this repository, and that file is exactly what you
-run.
-
-### Clone & symlink (recommended)
+`kcli` is a single self-contained bash script. Pin to a tag for reproducible installs:
 
 ```bash
-git clone https://github.com/PaloAltoNetworks/cortex-cloud.git
-cd cortex-cloud
-sudo ln -sf "$PWD/tools/kcli/kcli" /usr/local/bin/kcli
+curl -fsSL \
+  "https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/main/tools/kcli/kcli" \
+  -o /tmp/kcli
+sudo install -m 0755 /tmp/kcli /usr/local/bin/kcli
 kcli version
 ```
 
-To stay current, just pull the latest `main`:
-
-```bash
-cd /path/to/cortex-cloud
-git pull origin main
-```
-
-### Direct download (no clone)
-
-```bash
-sudo curl -fsSL \
-  https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/main/tools/kcli/kcli \
-  -o /usr/local/bin/kcli
-sudo chmod +x /usr/local/bin/kcli
-kcli version
-```
-
-To update later, re-run the same `curl` to overwrite the file in place.
-
-### Run from source
-
-```bash
-./tools/kcli/kcli help
-```
+Or clone the repo and symlink `tools/kcli/kcli` into your `PATH`.
 
 ---
 
-## Staying current (mandatory version check)
+## Usage
 
-Every invocation of `kcli` (other than `version` / `help`) parses the
-`VERSION="x.y.z"` constant out of the canonical copy on `main` and
-compares it to the local one. When the local script is older, `kcli`
-**hard-fails before running anything** with an actionable remediation
-message:
+### Step 1 — Download the values file
 
-```text
-[ERROR] A newer kcli version is available.
-[ERROR]   installed: v1.0.0
-[ERROR]   upstream:  v1.1.0
-[ERROR]
-[ERROR] kcli requires the latest version. Update before retrying:
-[ERROR]   - If installed via 'git clone':  cd <repo> && git pull
-[ERROR]   - If installed by file copy:     re-fetch tools/kcli/kcli from
-[ERROR]       https://raw.githubusercontent.com/PaloAltoNetworks/cortex-cloud/main/tools/kcli/kcli
-```
+In the Cortex Cloud portal, generate an installation bundle and download its files. **You will stop partway through the wizard** — see the [hand-off table](#how-kcli-fits-with-the-portal-install-wizard).
 
-The exit code in this case is `65` (data-format mismatch), distinct
-from the usage error (`64`) and runtime errors (`1`) so CI pipelines
-can distinguish "needs update" from "real failure".
+1. **Settings → Data Sources & Integrations**
+   ![Cortex Settings](docs/images/cortex-settings-menu.png)
+2. Click **Kubernetes**
+   ![Kubernetes tile](docs/images/cortex-data-sources-kubernetes.png)
+3. **Edit Profile** → set Profile Name `Standalone-Installer`, disable Auto Upgrade, **Apply**
+   ![Edit Profile](docs/images/cortex-edit-profile-settings.png)
+4. **Generate**, then in the **Connect Kubernetes** wizard:
 
-### When the check is skipped
+   ![Connect wizard](docs/images/cortex-kubernetes-connect-wizard.png)
 
-The check is best-effort by design — it must never become a footgun
-for legitimate operators on slow / restricted networks. It is skipped,
-with a `[WARN]` line, in any of:
+   - ✅ Download both `values.yaml` and `auth.json` to the workstation where you'll run `kcli`.
+   - 🛑 **Do not run** the "Run Installation Commands" block yet — copy it aside for Step 3.
 
-- `curl` is not installed.
-- The GitHub fetch times out (5 s) or returns no parseable VERSION.
-- `KCLI_SKIP_VERSION_CHECK=1` is exported (for air-gapped /
-  internally-vendored installs where remote fetch is impossible by
-  policy).
-
-In all skip cases the local script still runs — operators just don't
-get the "you're stale" guarantee.
-
-### Local builds ahead of upstream
-
-If your local `VERSION` is *higher* than the one on `main` (e.g.
-you're working on a feature branch), `kcli` warns once and proceeds
-— development builds are explicitly allowed to run.
+See [`examples/values-example.yaml`](examples/values-example.yaml) for a fully commented template of the portal-issued values file.
 
 ---
 
-## Commands
+### Step 2 — Mirror images
 
-```text
-kcli <command> [options]
+Log in to your **target** (private) registry first, then run `kcli mirror`:
 
-Commands:
-  mirror     Pull bundle container images from the source registry and push
-             them to a private registry (preserving multi-arch manifests).
-             Updates the --values file in place to point at the mirror
-             (a timestamped .bak is written first).
-  version    Print the kcli version.
-  help       Show top-level help.
+```bash
+docker login myregistry.azurecr.io
+
+kcli mirror \
+  --chart-version 2.0.0 \
+  --values ./values.yaml \
+  --private-registry myregistry.azurecr.io/cortex \
+  --docker-pull-secret-file ./pull-secret.dockerconfigjson
 ```
 
-### `kcli mirror`
+`kcli` resolves the chart from `oci://<global.imageRegistry>/helm/konnector-bundle:<version>` (read from your values file) using the credentials already present in `values.yaml`. **You do not need to run the wizard's `helm registry login` for mirroring** — only for the install in Step 3.
 
-```text
-Usage:
-  kcli mirror --chart <chart.tgz> --values <values-file> \
-              --private-registry <registry> [options]
-
-Required:
-  --chart <chart.tgz>              Path to the konnector Helm chart archive
-                                   (the .tgz issued for your tenant)
-  --values <values-file>           Helm values YAML (read AND written in place
-                                   — provides global.bundle.* enable map,
-                                   source-registry credentials, and gets
-                                   rewritten to point at the mirror)
-  --private-registry <registry>    Target registry, e.g.
-                                   myregistry.azurecr.io/proj/repo
-
-Optional:
-  --docker-pull-secret <secret>    Base64-encoded dockerPullSecret for the
-                                   private registry (written into the
-                                   --values file under global.dockerPullSecret)
-  --docker-pull-secret-file <file> Path to a Docker config JSON for the
-                                   private registry (will be base64-encoded
-                                   and written as global.dockerPullSecret)
-  --no-pull-secret                 Strip global.dockerPullSecret from the
-                                   --values file (use only if the cluster
-                                   already has access)
-  --dry-run                        Show what would be done without pulling
-                                   or pushing images. The --values file is
-                                   NOT rewritten in dry-run mode.
-  -h, --help                       Show command help
-```
-
-#### Quick start
+If you've already downloaded a chart archive (for example on an air-gapped relay host), pass it instead:
 
 ```bash
 kcli mirror \
   --chart ./konnector-2.0.0.tgz \
-  --values ./my-values.yaml \
+  --values ./values.yaml \
   --private-registry myregistry.azurecr.io/cortex \
-  --docker-pull-secret-file ~/.docker/config.json
+  --docker-pull-secret-file ./pull-secret.dockerconfigjson
 ```
 
-After mirroring completes, install the konnector chart by following the
-**Cortex Cloud portal** instructions for your tenant, passing the
-(now-rewritten) `./my-values.yaml` as the Helm values file.
+#### What changes in `values.yaml`
 
-#### Behaviour highlights
+`kcli` writes a backup to `<values>.bak.YYYYMMDDTHHMMSSZ` and edits three things:
 
-- **Bundle-version gate.** Before any registry traffic, the chart's
-  `global.version` is verified to be `>= v2`; older bundles fail fast
-  with an actionable error message (see [Bundle compatibility](#bundle-compatibility)).
-- **Multi-arch awareness.** Each image is inspected via
-  `docker manifest inspect`. Every `linux/*` platform is pulled
-  individually, and the destination tag is created with
-  `docker buildx imagetools create` so the multi-arch index is preserved.
-- **Single-arch fallback.** If `buildx imagetools` fails for some reason,
-  the tool falls back to `docker tag` + `docker push` and reports the
-  result as a single-arch push.
-- **Per-component repository overrides.** When the values file contains
-  `global.bundle.<component>.image.repository`, those entries are also
-  rewritten to point at the mirror; entries without an explicit
-  `repository` are left untouched (no spurious key is injected).
-- **Backup before mutation.** A timestamped copy
-  `<values-file>.bak.YYYYMMDDTHHMMSSZ` is written before the rewrite, so
-  you can always roll back with `mv <values-file>.bak.* <values-file>`.
-- **Dry-run** (`--dry-run`) skips every network operation, leaves the
-  `--values` file untouched (no rewrite, no `.bak`), and prints exactly
-  what would have happened — useful for change-management reviews.
+```diff
+ global:
+-  imageRegistry: us-central1-docker.pkg.dev/<src-proj>/<src-repo>
++  imageRegistry: myregistry.azurecr.io/cortex
+-  dockerPullSecret: <source-registry-creds-b64>
++  dockerPullSecret: <your-private-registry-creds-b64>
+   bundle:
+     <component>:
+       image:
+-        repository: <src-repo>/<component>
++        repository: <component>
+```
 
-### `kcli version`
+Commit the rewritten file if you're driving installs through GitOps.
+
+#### Providing the pull secret
+
+Exactly **one** of these is required — omitting all three is a hard error (we fail loudly to prevent a silent `ImagePullBackOff` at install time):
+
+| Flag | When to use |
+|------|-------------|
+| `--docker-pull-secret-file <file>` | You have a `dockerconfigjson` file with **inline** credentials. See [Pull Secrets](#pull-secrets-what-kubelet-accepts). |
+| `--docker-pull-secret <base64>` | You already have the secret base64-encoded. |
+| `--no-pull-secret` | Cluster pulls without an inline secret. Two sub-cases — pick the right one: |
+| &nbsp;&nbsp;• *managed identity* | IRSA, EKS Pod Identity, GKE Workload Identity, AKS Managed Identity — the node/pod auths to the registry implicitly. |
+| &nbsp;&nbsp;• *out-of-band secret* | You will create an `imagePullSecret` resource in the cluster yourself (or via GitOps) before installing. **Don't forget this step** — it's the #1 cause of `ImagePullBackOff` when using `--no-pull-secret`. |
+
+> ⚠️ **Do not pass `~/.docker/config.json` blindly.** It often delegates to a keychain or cloud CLI helper, which `kubelet` cannot use. See [Pull Secrets](#pull-secrets-what-kubelet-accepts).
+
+#### Dry run
+
+Preview without pulling/pushing or rewriting:
 
 ```bash
-$ kcli version
-kcli v1.0.0
-
-# `-v` and `--version` are accepted as aliases:
-$ kcli --version
-kcli v1.0.0
+kcli mirror --chart-version 2.0.0 --values ./values.yaml \
+  --private-registry myregistry.azurecr.io/cortex --dry-run
 ```
 
-The version string is the `VERSION="x.y.z"` constant declared at the
-top of `tools/kcli/kcli`. See
-[Staying current (mandatory version check)](#staying-current-mandatory-version-check)
-for how this value is compared against the canonical copy on
-`main` on every invocation.
-
-### `kcli help`
+#### Roll back
 
 ```bash
-kcli help
-kcli --help
-kcli -h
+mv values.yaml.bak.<TIMESTAMP> values.yaml
 ```
-
-All three forms print the top-level usage. For command-specific help, use
-`kcli <command> --help` (e.g. `kcli mirror --help`).
 
 ---
 
-## Inputs
+### Step 3 — Install the konnector
 
-`kcli mirror` takes two file inputs:
+Run the portal wizard's **Run Installation Commands** block, unchanged. It contains:
 
-| Flag       | What                                                                |
-|------------|---------------------------------------------------------------------|
-| `--chart`  | The konnector Helm chart archive (`.tgz` or `.tar.gz`, bundle v2+). |
-| `--values` | The customer values YAML issued for your tenant.                    |
+1. `helm registry login ...` — logs into the source OCI registry the install pulls the chart from.
+2. `helm upgrade --install ...` — installs the konnector against the values file `kcli mirror` rewrote, so pods pull images from your private registry.
 
-The values file only carries what is tenant-specific:
-
-- `global.imageRegistry` — source registry / repo path used for pull.
-- `global.dockerPullSecret` — base64 Docker config used to authenticate
-  against the **source** registry (and the field `kcli` rewrites with
-  the **private** registry credential at the end of the run).
-- `global.metadata.env` — deployment environment (one of
-  `dev` / `prod` / `fr` / `gov`). Used to resolve per-env image tags
-  from the chart's `image.tagsByEnv.<env>` map. Components whose tag
-  is supplied only via `tagsByEnv` (e.g. `cortex-agent`) are SKIPPED
-  if `global.metadata.env` is missing or doesn't match a key in the
-  map.
-
-The bundle version gate (`Chart.yaml` `version`, with `appVersion` as a
-fallback; major `>= 2`) and the catalog of mirrorable images
-(`global.bundle.<comp>.image` from the chart's own `values.yaml`) are
-read from `--chart` — the customer values file does not need to
-enumerate them.
-
-See [`examples/values-example.yaml`](examples/values-example.yaml) for the
-minimum shape of the values file.
+Run them together as the wizard shows them — they're a single login + install pair.
 
 ---
 
-## `dockerPullSecret` semantics
+## Pull Secrets: What `kubelet` Accepts
 
-When mirroring to a private registry, the cluster needs credentials to pull
-from your private registry. `kcli` enforces this explicitly — you must
-provide one of:
+> Read this **before** Step 2 if you're using `--docker-pull-secret-file`. Almost every "it worked locally but the pods can't pull" report traces back to a credential helper here.
 
-| Flag                                 | When to use                                                         |
-|--------------------------------------|---------------------------------------------------------------------|
-| `--docker-pull-secret <base64>`      | You already have the secret material as a base64 blob.              |
-| `--docker-pull-secret-file <path>`   | You have a Docker `config.json` — the tool base64-encodes it.       |
-| `--no-pull-secret`                   | The cluster nodes have pre-configured access (e.g. IRSA, IAM, ECR). |
+`kubelet` **cannot use Docker credential helpers** (`credsStore`, `credHelpers`, `osxkeychain`, `acr`, `gcloud`, `ecr-login`, etc.). It only understands inline credentials:
 
-Omitting all three flags is a hard error — this prevents leaving the
-values file in a state that silently fails at install time with
-`ImagePullBackOff`.
-
-The chosen secret is written into the values file under
-`global.dockerPullSecret` (or removed from it, with `--no-pull-secret`).
-
----
-
-## What `kcli mirror` writes
-
-`kcli mirror` does not generate any new files in the chart directory.
-Instead, it edits the `--values` file you passed in **in place** and
-writes a timestamped backup of the original next to it:
-
-```
-my-values.yaml                       # ← rewritten in place
-my-values.yaml.bak.20260504T000015Z  # ← byte-for-byte copy of the
-                                     #   pre-rewrite original
+```json
+{
+  "auths": {
+    "myregistry.azurecr.io": { "auth": "<base64(username:password)>" }
+  }
+}
 ```
 
-The rewritten values file is what you pass to the chart install per the
-**Cortex Cloud portal** instructions for your tenant. To roll back, simply
-move the backup over the rewritten file:
+Build one for your registry:
 
 ```bash
-mv my-values.yaml.bak.20260504T000015Z my-values.yaml
+REG="myregistry.azurecr.io"
+USER="<username>"          # ACR token name, GAR _json_key, robot account, etc.
+PASS="<password-or-token>"
+AUTH=$(printf '%s:%s' "$USER" "$PASS" | base64 | tr -d '\n')
+cat > pull-secret.dockerconfigjson <<EOF
+{"auths":{"$REG":{"auth":"$AUTH"}}}
+EOF
 ```
 
----
+Long-lived credential recipes per registry:
 
-## Environment variables
+- **ACR:** [ACR token](https://learn.microsoft.com/azure/container-registry/container-registry-repository-scoped-permissions) with `pull` rights → `<token-name>:<token-password>`
+- **GAR / GCR:** service account with `roles/artifactregistry.reader` → `_json_key:$(cat key.json)`
+- **ECR:** prefer IRSA / EKS Pod Identity + `--no-pull-secret` (ECR tokens expire after 12h)
+- **Harbor / Quay / Artifactory:** robot account `username:password`
+- **Docker Hub:** [Personal Access Token](https://docs.docker.com/security/for-developers/access-tokens/) → `<username>:<PAT>`
 
-| Variable                | Default     | Purpose                                                          |
-|-------------------------|-------------|------------------------------------------------------------------|
-| `NO_COLOR`              | _(unset)_   | Disable ANSI colors when set to a non-empty value                |
-| `DOCKER_CONFIG`         | `~/.docker` | Standard Docker config-dir override                              |
-| `TMPDIR`                | `/tmp`      | Override scratch directory                                       |
-| `KCLI_SKIP_VERSION_CHECK`| _(unset)_  | Bypass the mandatory upstream-version check (see [Staying current](#staying-current-mandatory-version-check)) |
-
----
-
-## Exit codes
-
-| Code  | Meaning                                                                   |
-|-------|---------------------------------------------------------------------------|
-| `0`   | Success.                                                                  |
-| `1`   | Runtime failure (unsupported bundle version, push failures, missing prereq, …). |
-| `64`  | Usage error — bad flags, missing required arguments. (`EX_USAGE`.)        |
-| `65`  | Mandatory upstream-version check failed (local script is stale; see [Staying current](#staying-current-mandatory-version-check)). |
-| `130` | Interrupted by `SIGINT` / `SIGTERM`.                                      |
+> Delete `pull-secret.dockerconfigjson` after running `kcli mirror` — the credential is now in your values file under `global.dockerPullSecret`.
 
 ---
 
-## Logging & diagnostics
+## Command Reference
 
-Each invocation writes a structured audit log to
-`$TMPDIR/kcli-log-XXXXXX.log`. The log is preserved across runs (success
-*and* failure) so you can always attach it to support tickets; on a
-non-zero exit its path is also surfaced in a `[WARN]` line.
+### `kcli mirror`
 
-For verbose debugging, run with `bash -x`:
+```
+kcli mirror (--chart <chart.tgz> | --chart-version <version>) \
+            --values <values-file> --private-registry <registry> \
+            (--docker-pull-secret <b64> | --docker-pull-secret-file <file> | --no-pull-secret) \
+            [--dry-run]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--chart <chart.tgz>` | one of these | Local konnector Helm chart archive (bundle v2+) |
+| `--chart-version <version>` | one of these | Pull the chart from `oci://<global.imageRegistry>/helm/konnector-bundle:<version>` (e.g. `2.0.0`). `<global.imageRegistry>` is read from `--values`. Requires `helm`. |
+| `--values <file>` | ✅ | Tenant values YAML. **Rewritten in place** (with `.bak` backup) |
+| `--private-registry <url>` | ✅ | Target registry (e.g. `myregistry.azurecr.io/proj/repo`) |
+| `--docker-pull-secret <b64>` | one of these | Base64-encoded dockerconfigjson |
+| `--docker-pull-secret-file <file>` | one of these | Path to dockerconfigjson (auto-encoded) |
+| `--no-pull-secret` | one of these | Strip `global.dockerPullSecret` from values (managed identity or out-of-band secret) |
+| `--dry-run` | — | Preview only — no pulls, pushes, or rewrites |
+| `-h, --help` | — | Show command help |
+
+### `kcli version` / `kcli help`
 
 ```bash
-bash -x ./tools/kcli/kcli mirror …
+kcli version        # also: --version, -v
+kcli help           # also: --help, -h
+kcli mirror --help  # command-specific help
 ```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `NO_COLOR` | Set to any value to disable ANSI colors |
+| `DOCKER_CONFIG` | Docker config dir (default: `~/.docker`) |
+| `TMPDIR` | Scratch dir for chart extraction and logs (default: `/tmp`) |
+| `KCLI_SKIP_VERSION_CHECK` | Set to `1` to bypass the upstream version check (air-gapped) |
+
+**Exit codes:** `0` success · `1` runtime failure · `64` usage error · `65` stale-version block · `130` interrupted.
 
 ---
 
-## Security notes
+## What `kcli` does NOT do
 
-- **No secrets are persisted by `kcli` itself.** The dockerPullSecret
-  material is held only in shell variables and the values file (which
-  lives where the operator chose to keep it). The audit log contains
-  only metadata, never credentials.
-- **Strict input validation.** Registry strings are bounded to a safe
-  character class (`[A-Za-z0-9._/:@-]`) and rejected outright if they
-  contain shell-injection-like sequences.
-- **Bundle gate.** Older / unrecognised bundle versions are rejected
-  before any registry traffic.
-- **Backup before mutation.** A timestamped `.bak` copy of the values
-  file is always written before the in-place rewrite — destructive edits
-  are reversible.
-- **Cleanup on failure.** `EXIT`, `INT`, and `TERM` traps remove
-  temporary scratch space even when interrupted. The values-file rewrite
-  is staged into a sibling temp file and committed via an atomic `mv`,
-  so on any failure the original file is left untouched and the
-  pre-rewrite `.bak` copy remains alongside it.
+To set expectations explicitly, `kcli` will never:
+
+- Run `helm install` / `helm upgrade` — that's the portal's command in Step 3.
+- Create Kubernetes `Secret` resources in your cluster.
+- Manage namespaces, RBAC, or cluster prerequisites.
+- Commit or push the rewritten `values.yaml` to Git — GitOps workflows must commit it themselves.
+- Mutate anything outside `--values` (and its `.bak` sibling) on the workstation.
+
+---
+
+## Staying Current
+
+Every `kcli` run (except `version` / `help`) compares the local `VERSION` to the canonical script on `main`. If older, `kcli` **fails fast** with an actionable message (exit `65`).
+
+The check is best-effort and is skipped (with a `[WARN]`) when `curl` is missing, the fetch times out (5 s), or `KCLI_SKIP_VERSION_CHECK=1` is set.
+
+To update:
+- Installed via `curl`: re-run the install command (bump `KCLI_VERSION`).
+- Installed via `git clone`: `git pull`.
+
+---
+
+## Troubleshooting
+
+**"Unsupported bundle version"** — `kcli mirror` needs bundle v2+. Check with `tar -xzOf <chart.tgz> konnector-bundle/Chart.yaml | yq '.version'`. Get a v2+ chart from the portal.
+
+**"Could not extract `global.imageRegistry` / `global.dockerPullSecret`"** — Your values file is missing these fields. The portal-issued file includes both — make sure you're not pointing at a hand-crafted file.
+
+**Docker login failures** — Source registry creds come from `global.dockerPullSecret` (must be valid base64). For the target, run `docker login <your-registry>` first (non-interactively in CI).
+
+**`ImagePullBackOff` after install** — Almost always one of:
+1. You used `--docker-pull-secret-file` with a `~/.docker/config.json` that delegates to a credential helper. Build a proper inline secret per [Pull Secrets](#pull-secrets-what-kubelet-accepts).
+2. You used `--no-pull-secret` but forgot to create the `imagePullSecret` resource (or your managed-identity binding is wrong).
+
+**Multi-arch push failures** — `kcli` uses `docker buildx imagetools create` and falls back to single-arch `docker tag` + `push`. Ensure `docker buildx version` works and a builder exists: `docker buildx create --use`.
+
+**Wrong `yq`** — Run `yq --version` — must show `mikefarah/yq` v4. Install: `brew install yq` (macOS) or see [mikefarah/yq install docs](https://github.com/mikefarah/yq#install).
+
+**"A newer kcli version is available" (exit 65)** — Update per [Staying Current](#staying-current), or set `KCLI_SKIP_VERSION_CHECK=1` in air-gapped environments.
+
+**Logs** — Each run writes `$TMPDIR/kcli-log-XXXXXX.log` (preserved on success and failure) — attach this to support tickets. For deep debugging: `bash -x /usr/local/bin/kcli mirror ...`.
+
+---
+
+## Examples
+
+- [`examples/values-example.yaml`](examples/values-example.yaml) — fully commented template of the portal-issued values file.
 
 ---
 
