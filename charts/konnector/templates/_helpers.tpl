@@ -82,6 +82,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: TOKEN_SECRET_NAME
+              value: {{ .Values.system.secrets.backendAuth.name | quote }}
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
