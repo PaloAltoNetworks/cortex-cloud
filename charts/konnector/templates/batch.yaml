@@ -47,6 +47,9 @@ spec:
           image: alpine/helm:3.17.2
           resources:
             {{- toYaml .Values.system.batch.cleanupJob.resources | nindent 12 }}
+          env:
+            - name: TOKEN_SECRET_NAME
+              value: {{ .Values.system.secrets.backendAuth.name | quote }}
           command: ["/bin/sh", "-c"]
           args:
             - |
