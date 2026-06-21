@@ -25,7 +25,7 @@ set -Eeuo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
-readonly VERSION="1.1.0"
+readonly VERSION="1.2.0"
 readonly PROGRAM_NAME="kcli"
 
 # Minimum supported konnector bundle major version. The mirror flow relies
@@ -776,6 +776,10 @@ registry_host=""
 project_path=""
 sa_json_key=""
 
+# Snapshot the customer's Docker config so the push phase can restore it
+# after the pull phase runs under an isolated DOCKER_CONFIG.
+ORIGINAL_DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
+
 # extract_credentials_from_values <values-file>
 # Reads image.repository and dockerPullSecret out of the customer values
 # file. The dockerPullSecret is a base64'd Docker config.json — we decode
@@ -842,6 +846,13 @@ login_to_source_registry() {
     warn "No service-account key available — skipping source registry login."
     return
   fi
+
+  # Isolate DOCKER_CONFIG so customer credHelpers don't hijack the vendor token.
+  info "Isolating Docker credentials to enforce vendor authentication…"
+  local isolated_config
+  isolated_config=$(mktemp -d "${TMP_ROOT}/${PROGRAM_NAME}-pull-config-XXXXXX")
+  register_temp_dir "$isolated_config"
+  export DOCKER_CONFIG="$isolated_config"
 
   info "Logging in to source registry: $registry_host …"
 
@@ -963,6 +974,11 @@ pull_chart_from_oci() {
 # mode by the caller. Exits 1 if the interactive login fails.
 ensure_target_registry_login() {
   local target_host="$1"
+
+  # Restore the customer's Docker config (pull phase ran isolated).
+  export DOCKER_CONFIG="$ORIGINAL_DOCKER_CONFIG"
+  info "Restored customer Docker context for target registry."
+
   local docker_config="${DOCKER_CONFIG:-$HOME/.docker}"
 
   info "Checking Docker login to target registry: $target_host …"
