@@ -1,4 +1,11 @@
-# Cortex Cloud Konnector — Image Mirroring CLI (`kcli`)
+# Cortex Cloud Konnector — CLI (`kcli`)
+
+`kcli` has two subcommands:
+
+| Command | What it does |
+|---|---|
+| [`kcli mirror`](#how-kcli-fits-with-the-portal-install-wizard) | Mirror konnector images from the Cortex source registry into your private registry and rewrite `values.yaml` in place. |
+| [`kcli purge`](#purge--corrupted-environment-recovery) | **"Real delete"** for corrupted/orphaned installs: best-effort `helm uninstall` followed by an across-all-API-groups cleanup of every resource carrying `app.kubernetes.io/author=pan`. |
 
 `kcli mirror` does three things, in order:
 
@@ -28,6 +35,10 @@ kcli mirror \
 
 # 4. Run the portal's `helm registry login && helm upgrade --install` block,
 #    unchanged, against the rewritten values.yaml.
+
+# (Recovery) Broken / orphaned install? Preview first, then purge.
+kcli purge --dry-run
+kcli purge   # see Purge section for --force / --delete-namespace / etc.
 ```
 
 Need a kubelet-compatible `pull-secret.dockerconfigjson`? See [Pull Secrets](#pull-secrets-what-kubelet-accepts) — this is the #1 source of `ImagePullBackOff` and you should read it before step 3.
@@ -44,6 +55,7 @@ Need a kubelet-compatible `pull-secret.dockerconfigjson`? See [Pull Secrets](#pu
   - [Step 2 — Mirror images](#step-2--mirror-images)
   - [Step 3 — Install the konnector](#step-3--install-the-konnector)
 - [Pull Secrets: What `kubelet` Accepts](#pull-secrets-what-kubelet-accepts)
+- [Purge — corrupted-environment recovery](#purge--corrupted-environment-recovery)
 - [Command Reference](#command-reference)
 - [What `kcli` does NOT do](#what-kcli-does-not-do)
 - [Staying Current](#staying-current)
@@ -257,6 +269,79 @@ Long-lived credential recipes per registry:
 
 ---
 
+## Purge — corrupted-environment recovery
+
+`kcli purge` is the escape hatch for clusters where the konnector install is broken, half-uninstalled, or has drifted in a way that ordinary `helm uninstall` can't fix. It is **not** the normal uninstall path — for a healthy install just run `helm uninstall` against the release the portal used.
+
+### When to reach for `purge`
+
+- `helm uninstall` reports success but resources are still in the cluster.
+- The Helm release secret (`sh.helm.release.v1.*`) is missing or corrupted, so `helm uninstall` errors out before doing anything.
+- You inherited a partially-installed cluster (multiple historical release names, leftover CRDs, etc.) and need to start clean.
+- A previous `kcli purge` was interrupted and you need to finish the job.
+
+### What `purge` does (in order)
+
+1. **Prints a target banner** — kube-context name and cluster server URL — and asks you to confirm you're operating on the right cluster. **Always shown**, even with `--yes`.
+2. **Best-effort `helm uninstall`** for both historical release names (`k8s-connector-release` *and* `konnector`) in the `--namespace` you supply (default: `panw`). Helm failures here are **non-fatal** — that is the whole point of purge, since a corrupted release state is precisely what you're trying to recover from. Outcomes are recorded in a `HELM SUMMARY` table.
+3. **Sweeps every API group in the cluster — including any installed CRDs** — using two `kubectl api-resources` calls (one for namespaced, one for cluster-scoped) and per-kind `kubectl get -A -l app.kubernetes.io/author=pan -o json`. Discovery results are aggregated into a deduplicated `(apiVersion, kind, namespace, name)` table.
+4. **Prints a full per-resource listing** grouped by `Group/Kind` (namespaced rows shown as `namespace/name`, cluster-scoped as bare `name`) plus a `Summary by Group/Kind` table and a grand total, then asks for a second, explicit `yes` before any delete happens. With `--dry-run`, steps 5–8 are skipped, but the node-annotation preview (step 6) is still printed so dry-run is a complete preview of every mutating phase.
+5. **Deletes each row** by its fully-qualified type (`kind.group/name`) with `--ignore-not-found --wait=false`. Per-row outcomes land in a `PURGE SUMMARY` table.
+6. **Strips every annotation prefixed `paloaltonetworks.com/` from every Node.** **Always runs**, even when the label sweep found nothing — node annotations live on `Node` objects that pre-date the install and therefore never carry the `author=pan` label, so the main sweep cannot reach them. A `NODE ANNOTATION SUMMARY` table reports per-node outcomes. The prefix is hard-coded; the strip step is strict (a control annotation like `other.example.com/keep` is **never** touched).
+7. **`--force` second pass (optional)** — patches `metadata.finalizers=[]` on rows that survived the first delete and re-issues the delete. Requires a separate `yes` confirmation; bypasses controller-driven cleanup, so use with care.
+8. **`--delete-namespace` (optional)** — drops the namespace itself once labeled resources are gone. Refused for `kube-system`, `kube-public`, `kube-node-lease`, and `default`. If the namespace contains workloads that do **not** carry the author label, you'll be warned and asked to confirm again. The "foreign workload" check uses `kubectl get all`, which only covers standard workload kinds (`Pod`, `Deployment`, `Service`, `Job`, `CronJob`, `ReplicaSet`, `StatefulSet`, `DaemonSet`, `ReplicationController`); ConfigMap/Secret/PVC/RBAC/CRD resources inside the namespace are NOT counted but ARE deleted with the namespace.
+
+### Hardcoded contracts (no flags)
+
+These knobs are deliberately not configurable — they reflect permanent properties of the konnector chart:
+
+| Knob | Value | Why |
+|---|---|---|
+| Label selector | `app.kubernetes.io/author=pan` | Permanent ownership marker stamped on every chart resource by [`common.labels`](../../charts/konnector/templates/_helpers.tpl). |
+| Releases uninstalled | `k8s-connector-release` **and** `konnector` | Both names exist in the wild; we always try both, idempotently. |
+| Node annotation prefix stripped | `paloaltonetworks.com/` | Konnector writes annotations under this prefix onto `Node` objects (cluster-id, scan markers, etc.). Mirrors `AnnotationPrefix` in the konnector source; strict prefix match (does NOT touch unrelated keys). |
+| Skipped API resources | `events`, `bindings`, `componentstatuses`, the `*subjectaccessreview*` family | Cannot be listed by label even in principle. |
+| Protected namespaces | `kube-system`, `kube-public`, `kube-node-lease`, `default` | Control-plane namespaces; never deleted by `--delete-namespace`. |
+
+### Quick start
+
+```bash
+# Standard recovery — interactive, default namespace (panw).
+kcli purge
+
+# Preview what would be deleted, without touching anything.
+kcli purge --dry-run
+
+# Non-interactive (CI / scripted recovery), also drop the namespace.
+kcli purge --yes --delete-namespace
+
+# Stuck on finalizers (typical for some CRDs).
+kcli purge --force
+
+# Custom namespace + non-default context.
+kcli purge --namespace mykonnector --kube-context staging-east
+```
+
+### Safety rails
+
+- The kube-context and cluster server URL are **always** printed and confirmed before any change.
+- `kubectl cluster-info` is called pre-flight — if the cluster is unreachable, purge aborts before any destructive call.
+- `--yes` is **downgraded to an interactive prompt** when the active context name matches `prod` / `production` (case-insensitive). Production fat-fingers are the highest-impact failure mode for this command.
+- Every `helm` and `kubectl` invocation is mirrored verbatim — command line + stdout + stderr — into `$TMPDIR/kcli-log-XXXXXX.log`. Attach this to any support ticket.
+
+### What purge does NOT touch
+
+- Resources without the `app.kubernetes.io/author=pan` label.
+- Anything in the protected namespaces above, **unless** those resources themselves carry the author label.
+- Your kubeconfig, your Helm cache, or any local files.
+- The Cortex source registry credentials in any values file.
+
+### Recovery / rollback
+
+There is no rollback for a delete — re-install the konnector from the portal (or your GitOps source of truth) once purge reports `[OK] Purge complete.`. The audit log retains a per-resource record of what was deleted.
+
+---
+
 ## Command Reference
 
 ### `kcli mirror`
@@ -280,12 +365,32 @@ kcli mirror (--chart <chart.tgz> | --chart-version <version>) \
 | `--dry-run` | — | Preview only — no pulls, pushes, or rewrites |
 | `-h, --help` | — | Show command help |
 
+### `kcli purge`
+
+```
+kcli purge [--namespace <ns>] [--kube-context <ctx>] \
+           [--dry-run] [--yes] [--force] [--delete-namespace]
+```
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--namespace <ns>` | — | Namespace for the helm uninstall + optional `--delete-namespace` step. Default: `panw`. Discovery itself is cluster-wide regardless of this flag. |
+| `--kube-context <ctx>` | — | kubectl/helm context to target. Defaults to your current kubectl context. |
+| `--dry-run` | — | Run helm + discovery, print what would be deleted, exit without deleting. |
+| `--yes`, `-y` | — | Skip the interactive `yes` confirmation. Ignored — and downgraded to an interactive prompt — when the active context name matches `/prod/i`. |
+| `--force` | — | Second pass: for any row that survived the first delete (typically blocked by a stuck finalizer), patch `metadata.finalizers=[]` and re-issue the delete. Requires its own confirmation. |
+| `--delete-namespace` | — | Delete the `--namespace` itself after the labeled resources are gone. Refused for `kube-system`, `kube-public`, `kube-node-lease`, `default`. |
+| `-h`, `--help` | — | Show command help. |
+
+The purge label selector (`app.kubernetes.io/author=pan`) and the two Helm release names (`k8s-connector-release`, `konnector`) are **hardcoded contracts of the konnector chart** — they are not exposed as flags. See [Purge — corrupted-environment recovery](#purge--corrupted-environment-recovery).
+
 ### `kcli version` / `kcli help`
 
 ```bash
 kcli version        # also: --version, -v
 kcli help           # also: --help, -h
 kcli mirror --help  # command-specific help
+kcli purge  --help  # command-specific help
 ```
 
 ### Environment Variables
@@ -307,9 +412,10 @@ To set expectations explicitly, `kcli` will never:
 
 - Run `helm install` / `helm upgrade` — that's the portal's command in Step 3.
 - Create Kubernetes `Secret` resources in your cluster.
-- Manage namespaces, RBAC, or cluster prerequisites.
+- Manage namespaces, RBAC, or cluster prerequisites (except via `kcli purge --delete-namespace`, which only deletes).
 - Commit or push the rewritten `values.yaml` to Git — GitOps workflows must commit it themselves.
 - Mutate anything outside `--values` (and its `.bak` sibling) on the workstation.
+- Delete resources that don't carry the `app.kubernetes.io/author=pan` label, even during `purge`.
 
 ---
 
@@ -350,6 +456,7 @@ To update:
 ## Examples
 
 - [`examples/values-example.yaml`](examples/values-example.yaml) — fully commented template of the portal-issued values file.
+- [`examples/purge-smoke-test.sh`](examples/purge-smoke-test.sh) — end-to-end smoke test for `kcli purge` (spins up a `kind` cluster, plants labeled resources including a CRD instance, and asserts purge cleans everything across all API groups).
 
 ---
 

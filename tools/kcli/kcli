@@ -12,6 +12,10 @@
 #   mirror   — pull bundle images from the source registry, push them to
 #              a private registry (preserving multi-arch manifests), and
 #              update the --values file in place (a .bak is written first).
+#   purge    — "real delete" for corrupted/orphaned konnector installs:
+#              best-effort `helm uninstall` of both historical release names
+#              followed by an across-all-API-groups label-based cleanup
+#              of every resource carrying app.kubernetes.io/author=pan.
 #   version  — print the kcli version.
 #   help     — show top-level help.
 #
@@ -22,10 +26,43 @@
 
 set -Eeuo pipefail
 
+# Bash 4.0+ pre-flight. We use mapfile, ${var,,}-style features, and
+# similar bash-4 constructs throughout. Without this check, the script
+# would silently misbehave on any host shipping an older bash — most
+# notably stock macOS (bash 3.2.57), but also some stripped-down Linux
+# images and embedded systems. Failing here with an actionable message
+# is much better than a mid-run "bad substitution" or "command not
+# found: mapfile" surprise. Per-platform install hints follow.
+if (( BASH_VERSINFO[0] < 4 )); then
+  echo "kcli requires bash 4.0 or newer (you have $BASH_VERSION)." >&2
+  echo "" >&2
+  case "$(uname -s 2>/dev/null)" in
+    Darwin)
+      echo "macOS ships bash 3.2. Install a newer one with:" >&2
+      echo "    brew install bash" >&2
+      echo "No shell change is needed: kcli's '/usr/bin/env bash' shebang" >&2
+      echo "will pick up the Homebrew bash automatically — make sure" >&2
+      echo "/opt/homebrew/bin (Apple Silicon) or /usr/local/bin (Intel)" >&2
+      echo "comes BEFORE /bin on your PATH." >&2
+      ;;
+    Linux)
+      echo "Install a current bash via your distro's package manager:" >&2
+      echo "    apt-get install bash    # Debian / Ubuntu" >&2
+      echo "    dnf install bash        # Fedora / RHEL" >&2
+      echo "    apk add bash            # Alpine (BusyBox sh by default)" >&2
+      ;;
+    *)
+      echo "Install bash 4+ via your platform's package manager and" >&2
+      echo "ensure it is first on PATH so '/usr/bin/env bash' picks it up." >&2
+      ;;
+  esac
+  exit 1
+fi
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
-readonly VERSION="1.2.0"
+readonly VERSION="1.3.0"
 readonly PROGRAM_NAME="kcli"
 
 # Minimum supported konnector bundle major version. The mirror flow relies
@@ -276,6 +313,13 @@ ${BOLD}Commands:${NC}
              them to a private registry (preserving multi-arch manifests).
              Updates the --values file in place to point at the mirror
              (a timestamped .bak is written first).
+  purge      "Real delete" for corrupted/orphaned konnector installs.
+             Runs 'helm uninstall' (best-effort, never aborts) for both
+             historical release names, then sweeps EVERY API group in the
+             cluster — including CRDs — for resources carrying the label
+             app.kubernetes.io/author=pan, and (after confirmation)
+             deletes them. Intended for cluster cleanup, not the normal
+             uninstall path.
   version    Print the ${PROGRAM_NAME} version.
   help       Show this help message.
 
@@ -428,6 +472,137 @@ ${BOLD}Examples:${NC}
     --values my-values.yaml \\
     --private-registry myregistry.azurecr.io/cortex \\
     --dry-run
+EOF
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Purge-flow constants & usage
+# ─────────────────────────────────────────────────────────────────────────────
+# Permanent ownership label stamped by the chart's common.labels helper.
+readonly PURGE_LABEL_KEY="app.kubernetes.io/author"
+readonly PURGE_LABEL_VALUE="pan"
+readonly PURGE_LABEL_SELECTOR="${PURGE_LABEL_KEY}=${PURGE_LABEL_VALUE}"
+
+# Historical Helm release names — both are always uninstalled.
+readonly -a PURGE_RELEASE_NAMES=("k8s-connector-release" "konnector")
+
+# Annotation prefix the konnector writes onto Node objects.
+readonly PURGE_NODE_ANNOTATION_PREFIX="paloaltonetworks.com/"
+
+# Default namespace for the helm uninstall + optional --delete-namespace.
+readonly PURGE_DEFAULT_NAMESPACE="panw"
+
+# Control-plane namespaces --delete-namespace will never touch.
+readonly -a PURGE_PROTECTED_NAMESPACES=(
+  "kube-system" "kube-public" "kube-node-lease" "default"
+)
+
+# Virtual / non-listable resources to skip during discovery.
+readonly -a PURGE_SKIP_RESOURCES=(
+  "events" "events.events.k8s.io" "bindings" "componentstatuses"
+  "tokenreviews" "subjectaccessreviews" "selfsubjectaccessreviews"
+  "selfsubjectrulesreviews" "localsubjectaccessreviews"
+)
+
+purge_usage() {
+  cat <<EOF
+${BOLD}${PROGRAM_NAME} purge${NC}
+
+"Real delete" for a corrupted or orphaned konnector installation.
+
+This command is for ${BOLD}cluster cleanup, not the normal uninstall path${NC}.
+Use it when 'helm uninstall' alone has left orphaned resources behind,
+when the Helm release state itself is broken, or when you simply need to
+prove the cluster is fully clean before re-installing.
+
+${BOLD}Workflow:${NC}
+  1. Print the active kube-context + cluster server URL and ask you to
+     confirm you're operating on the right cluster.
+  2. Best-effort 'helm uninstall' for BOTH historical release names:
+       - k8s-connector-release
+       - konnector
+     Helm errors here are ${BOLD}non-fatal${NC} — the whole point of purge is to
+     clean up even when Helm state is corrupted. Failures are reported
+     in a HELM SUMMARY table and the run continues.
+  3. Sweep ${BOLD}every${NC} API group in the cluster — including any installed
+     CRDs (cert-manager.io, monitoring.coreos.com, etc.) — for resources
+     carrying the permanent ownership label:
+       ${PURGE_LABEL_SELECTOR}
+  4. Print a grouped summary table of what was found and ask for an
+     explicit 'yes' before deleting anything.
+  5. Delete each resource by fully-qualified type ('<kind>.<group>') so
+     CRD name collisions cannot misdirect the delete call.
+  6. Strip every annotation prefixed '${PURGE_NODE_ANNOTATION_PREFIX}' from
+     EVERY Node in the cluster. Nodes themselves never carry the author
+     label (they pre-date the install) so the main sweep cannot reach
+     these annotations; this step exists to scrub them. Always runs.
+
+${BOLD}Usage:${NC}
+  ${PROGRAM_NAME} purge [--namespace <ns>] [--kube-context <ctx>] \\
+                  [--dry-run] [--yes] [--force] [--delete-namespace]
+
+${BOLD}Optional:${NC}
+  --namespace <ns>         Namespace to target for the Helm uninstall and
+                           the optional --delete-namespace step.
+                           Default: ${PURGE_DEFAULT_NAMESPACE}.
+                           Discovery itself is cluster-wide and is NOT
+                           limited to this namespace — the label sweep
+                           always covers every namespace plus cluster-
+                           scoped resources.
+  --kube-context <ctx>     kubectl/helm context to operate against.
+                           Defaults to your current kubectl context.
+  --dry-run                Show the helm calls and discovered resource
+                           list, then exit WITHOUT deleting anything.
+  --yes, -y                Skip the interactive 'yes' confirmation.
+                           Ignored — and downgraded to an interactive
+                           prompt — when the active context name matches
+                           /prod/i, to make production fat-fingers harder.
+  --force                  Second pass after the main delete: for any row
+                           that survived (typically blocked by a stuck
+                           finalizer), patch metadata.finalizers=[] and
+                           re-issue the delete. Requires its own 'yes'.
+                           Use with care — clearing finalizers bypasses
+                           controller-driven cleanup.
+  --delete-namespace       After the labeled resources are gone, delete
+                           the --namespace itself. Refused for control-
+                           plane namespaces (${PURGE_PROTECTED_NAMESPACES[*]}).
+                           If the namespace contains workloads that do
+                           NOT carry the author label, you'll be warned
+                           and asked to confirm a second time.
+  -h, --help               Show this help message.
+
+${BOLD}What purge does NOT touch:${NC}
+  - Resources without the ${PURGE_LABEL_KEY}=${PURGE_LABEL_VALUE} label.
+  - Anything in protected namespaces (${PURGE_PROTECTED_NAMESPACES[*]})
+    unless those resources themselves carry the author label.
+  - Your kubeconfig, your Helm cache, or any local files.
+  - The Cortex source registry credentials in any values file.
+
+${BOLD}Exit codes:${NC}
+  0    Success (clean, or all confirmed deletes succeeded).
+  1    One or more resource deletions failed.
+  64   Usage error (bad flag).
+  65   Stale kcli version (run version check).
+  130  Interrupted by user, or confirmation declined.
+
+${BOLD}Prerequisites:${NC} bash 4+, helm 3.8+, kubectl, jq.
+
+${BOLD}Examples:${NC}
+  # Standard recovery — default namespace, interactive confirmation.
+  ${PROGRAM_NAME} purge
+
+  # Preview only — see what would be deleted, then exit.
+  ${PROGRAM_NAME} purge --dry-run
+
+  # Clean a custom namespace in a non-default context, also dropping
+  # the namespace itself once the labeled resources are gone.
+  ${PROGRAM_NAME} purge --namespace mykonnector \\
+                       --kube-context staging-east \\
+                       --delete-namespace
+
+  # Stuck finalizers — clear them and retry.
+  ${PROGRAM_NAME} purge --force
 EOF
 }
 
@@ -1708,6 +1883,873 @@ cmd_mirror() {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Purge flow — helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Lowercase a string via bash 4's ${var,,}.
+tolower() {
+  printf '%s' "${1,,}"
+}
+
+# Run a command, tee-ing its output into $LOG_FILE with a timestamped
+# preamble. Returns the wrapped command's own exit code.
+run_logged() {
+  local label="$1"; shift
+  local ts; ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  if [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]]; then
+    printf '[%s] CMD (%s): %s\n' "$ts" "$label" "$*" >> "$LOG_FILE"
+  fi
+
+  local rc=0
+  if [[ -n "$LOG_FILE" && -w "$LOG_FILE" ]]; then
+    "$@" 2>&1 | tee -a "$LOG_FILE"
+    rc="${PIPESTATUS[0]}"
+  else
+    "$@"
+    rc=$?
+  fi
+  return "$rc"
+}
+
+# Emit --context / --kube-context (or nothing) for kubectl / helm.
+purge_kubectl_args() {
+  if [[ -n "${purge_kube_context:-}" ]]; then
+    printf '%s\n%s\n' "--context" "$purge_kube_context"
+  fi
+}
+purge_helm_args() {
+  if [[ -n "${purge_kube_context:-}" ]]; then
+    printf '%s\n%s\n' "--kube-context" "$purge_kube_context"
+  fi
+}
+
+# Prompt for a literal yes/y from /dev/tty. Honors --yes, except on
+# prod-named contexts.
+purge_confirm() {
+  local prompt="$1" reply
+
+  if purge_should_skip_confirm; then
+    info "--yes supplied — auto-confirming: $prompt"
+    log  "auto-confirmed via --yes: $prompt"
+    return 0
+  fi
+
+  if [[ -r /dev/tty ]]; then
+    printf '%s [yes/N]: ' "$prompt" > /dev/tty
+    IFS= read -r reply < /dev/tty || reply=""
+  else
+    printf '%s [yes/N]: ' "$prompt"
+    IFS= read -r reply || reply=""
+  fi
+
+  case "$(tolower "$reply")" in
+    yes|y) log "confirmed: $prompt"; return 0 ;;
+    *)     log "declined:  $prompt"; return 1 ;;
+  esac
+}
+
+# True (rc=0) only when --yes was passed AND the active context does
+# NOT look like production. On prod-named contexts --yes is downgraded
+# to interactive (rc=1) and a warning is printed.
+purge_should_skip_confirm() {
+  [[ "${purge_assume_yes:-false}" == "true" ]] || return 1
+
+  local ctx_lc
+  ctx_lc=$(tolower "${purge_active_context:-}")
+  if [[ "$ctx_lc" == *prod* ]]; then
+    warn "--yes is being IGNORED because the active context ('${purge_active_context}')"
+    warn "looks like production. Interactive confirmation required."
+    return 1
+  fi
+  return 0
+}
+
+# Show kube-context + cluster URL; abort early if the cluster is
+# unreachable, so we never start mutating an inaccessible cluster.
+purge_print_target_banner() {
+  local ctx server
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  # If --kube-context was supplied, that IS the active context — use it
+  # directly. `kubectl config current-context` always reports the
+  # kubeconfig's globally-set default and ignores the --context flag, so
+  # calling it here would (a) be misleading when --kube-context overrides
+  # the default and (b) wrongly error out when no default is set even
+  # though the user supplied a valid --kube-context.
+  if [[ -n "${purge_kube_context:-}" ]]; then
+    ctx="$purge_kube_context"
+    # Sanity-check the supplied context exists in kubeconfig — gives a
+    # clean error instead of a confusing cluster-info failure below.
+    # Buffer the list first: `kubectl … | grep -q` can race against
+    # `set -o pipefail` (grep closes the pipe early, kubectl gets
+    # SIGPIPE, pipefail flips the whole pipeline to non-zero).
+    local _all_contexts
+    _all_contexts=$(kubectl config get-contexts -o name 2>/dev/null || true)
+    if ! grep -Fxq -- "$ctx" <<<"$_all_contexts"; then
+      error "Context '$ctx' not found in your kubeconfig."
+      error "Available contexts:"
+      printf '%s\n' "$_all_contexts" | sed 's/^/    /' >&2
+      exit 1
+    fi
+  else
+    ctx=$(kubectl config current-context 2>/dev/null || true)
+    if [[ -z "$ctx" ]]; then
+      error "kubectl reports no current context. Set one with:"
+      error "    kubectl config use-context <name>"
+      error "or pass --kube-context <name> to ${PROGRAM_NAME} purge."
+      exit 1
+    fi
+  fi
+  purge_active_context="$ctx"
+
+  # Locale-safe: read the URL from kubeconfig instead of grepping
+  # `kubectl cluster-info` (localized + may include deprecation lines).
+  server=$(kubectl ${kctx[@]+"${kctx[@]}"} config view --minify \
+             -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null || true)
+
+  # Reachability pre-flight — abort before any mutating call.
+  if ! kubectl ${kctx[@]+"${kctx[@]}"} cluster-info \
+         >/dev/null 2>&1; then
+    error "kubectl cluster-info failed for context '$ctx'."
+    error "Verify your kubeconfig and network reachability before retrying."
+    exit 1
+  fi
+  [[ -z "$server" ]] && server="<unknown>"
+
+  local banner_title="PURGE TARGET — confirm you are operating on the RIGHT cluster"
+  [[ "${purge_dry_run:-false}" == "true" ]] && \
+    banner_title="PURGE TARGET — [DRY RUN] preview only, NO changes will be made"
+
+  print_banner "$banner_title"
+  printf "  %sContext:%s     %s\n"  "$BOLD" "$NC" "$ctx"
+  printf "  %sCluster URL:%s %s\n"  "$BOLD" "$NC" "$server"
+  printf "  %sNamespace:%s   %s\n"  "$BOLD" "$NC" "$purge_namespace"
+  printf "  %sLabel:%s       %s\n"  "$BOLD" "$NC" "$PURGE_LABEL_SELECTOR"
+  printf "  %sReleases:%s    %s\n"  "$BOLD" "$NC" "${PURGE_RELEASE_NAMES[*]}"
+  if [[ "${purge_dry_run:-false}" == "true" ]]; then
+    printf "  %sMode:%s        %s[DRY RUN]%s no resources will be deleted\n" \
+      "$BOLD" "$NC" "$YELLOW" "$NC"
+  fi
+  echo ""
+  log "Purge target: context=$ctx server=$server namespace=$purge_namespace dry_run=${purge_dry_run:-false}"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Purge-specific summary rendering
+# ─────────────────────────────────────────────────────────────────────────────
+# Row schema: STATUS|KIND|TARGET|NAMESPACE|RESULT|NOTE  (pipe-delimited).
+# Separate from the mirror flow's print_summary_table, whose columns are
+# image-report specific (COMPONENT/IMAGE/TAG/ARCHS).
+
+# purge_summary_row <summary-file> <STATUS> <KIND> <TARGET> <NS> <RESULT> [NOTE]
+purge_summary_row() {
+  local file="$1" status="$2" kind="$3" target="$4" ns="$5" result="$6"
+  local note="${7:-}"
+  printf '%s|%s|%s|%s|%s|%s\n' \
+    "${status//|/_}" "${kind//|/_}" "${target//|/_}" \
+    "${ns//|/_}" "${result//|/_}" "${note//|/_}" >> "$file"
+}
+
+# print_purge_summary_table <title> <summary-file> <ok-label>
+# Sets globals: total_ok, total_fail, total_skip
+print_purge_summary_table() {
+  local title="$1" summary_file="$2" ok_label="$3"
+
+  print_section "$title"
+
+  printf "  %s%-6s %-18s %-44s %-22s %-10s %s%s\n" "$CYAN" \
+    "STAT" "KIND" "TARGET" "NAMESPACE" "RESULT" "NOTE" "$NC"
+  printf "  %-6s %-18s %-44s %-22s %-10s %s\n" \
+    "──────" \
+    "──────────────────" \
+    "────────────────────────────────────────────" \
+    "──────────────────────" \
+    "──────────" "─────────"
+
+  total_ok=0; total_fail=0; total_skip=0
+
+  if [[ -f "$summary_file" ]]; then
+    local status kind target ns result note icon
+    while IFS='|' read -r status kind target ns result note; do
+      case "$status" in
+        OK)      icon="${GREEN}✓${NC}";  total_ok=$((total_ok + 1)) ;;
+        FAILED)  icon="${RED}✗${NC}";    total_fail=$((total_fail + 1)) ;;
+        SKIPPED) icon="${YELLOW}⊘${NC}"; total_skip=$((total_skip + 1)) ;;
+        *)       icon="?" ;;
+      esac
+      printf '  %b      ' "$icon"
+      printf '%-18s %-44s %-22s %-10s %s\n' \
+        "$kind" "$target" "$ns" "$result" "$note"
+    done < "$summary_file"
+  fi
+
+  echo ""
+  printf "  %s%s:%s  %d    %sFailed:%s  %d    %sSkipped:%s  %d\n" \
+    "$GREEN"  "$ok_label" "$NC" "$total_ok" \
+    "$RED"    "$NC" "$total_fail" \
+    "$YELLOW" "$NC" "$total_skip"
+  echo ""
+
+  log "${title}: ${ok_label}=${total_ok} Failed=${total_fail} Skipped=${total_skip}"
+}
+
+
+# Best-effort uninstall of every historical release name. Helm errors
+# are non-fatal — the resource sweep always runs.
+helm_uninstall_all_releases() {
+  local ns="$1" dry_run="$2"
+  local summary
+  summary=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-helm-summary-XXXXXX")
+  register_temp_file "$summary"
+
+  print_section "STEP 2/5 — HELM UNINSTALL (best-effort, never aborts)"
+
+  # Mapfile pattern keeps multi-word context names safe (mirrors kubectl).
+  local -a hctx; mapfile -t hctx < <(purge_helm_args)
+
+  local release rc
+  local -a base_cmd
+  local dry_label=""
+  [[ "$dry_run" == "true" ]] && dry_label="[DRY RUN] "
+
+  for release in "${PURGE_RELEASE_NAMES[@]}"; do
+    info "${dry_label}Uninstalling helm release: $release (namespace=$ns)"
+
+    base_cmd=(helm uninstall "$release" -n "$ns" --ignore-not-found --debug)
+    if [[ "$dry_run" == "true" ]]; then
+      base_cmd+=(--dry-run)
+    fi
+    base_cmd+=("${hctx[@]+"${hctx[@]}"}")
+
+    if run_logged "helm-uninstall:$release" "${base_cmd[@]}"; then
+      rc=0
+    else
+      rc=$?
+    fi
+
+    if (( rc == 0 )); then
+      if [[ "$dry_run" == "true" ]]; then
+        ok "[DRY RUN] helm would uninstall $release (or it is already absent)"
+        purge_summary_row "$summary" OK \
+          "helm-uninstall" "$release" "$ns" "would-uninstall" "dry-run"
+      else
+        ok "helm uninstall $release: OK (or already absent)"
+        purge_summary_row "$summary" OK \
+          "helm-uninstall" "$release" "$ns" "uninstalled" ""
+      fi
+    else
+      warn "${dry_label}helm uninstall $release exited rc=$rc — continuing to resource cleanup."
+      warn "(This is expected when the release secret is missing or corrupted.)"
+      purge_summary_row "$summary" FAILED \
+        "helm-uninstall" "$release" "$ns" "rc=$rc" "non-fatal"
+    fi
+  done
+
+  local label="Uninstalled"
+  [[ "$dry_run" == "true" ]] && label="Would-uninstall"
+  print_purge_summary_table "HELM SUMMARY${dry_label:+ [DRY RUN]}" "$summary" "$label"
+}
+
+# Sweep every API group (incl. CRDs) for objects with the author label.
+# Writes "<apiVersion>\t<kind>\t<namespace>\t<name>" per match to
+# <out-rows-file>; namespace is "-" for cluster-scoped objects.
+purge_discover_resources() {
+  local out_file="$1"
+  local banner_title="${2:-STEP 3/5 — DISCOVERING RESOURCES (label: ${PURGE_LABEL_SELECTOR})}"
+  : > "$out_file"
+
+  print_section "$banner_title"
+  info "Sweeping every API group, including CRDs…"
+  log  "discovery start: selector=$PURGE_LABEL_SELECTOR"
+
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  # Two api-resources calls: one for namespaced, one for cluster-scoped,
+  # so we know per-kind whether `-A` is valid below.
+  local resources_file
+  resources_file=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-api-resources-XXXXXX")
+  register_temp_file "$resources_file"
+
+  local res
+  while IFS= read -r res; do
+    [[ -z "$res" ]] && continue
+    printf 'ns\t%s\n' "$res" >> "$resources_file"
+  done < <(kubectl ${kctx[@]+"${kctx[@]}"} api-resources \
+             --verbs=list --namespaced=true \
+             -o name --no-headers 2>/dev/null || true)
+
+  while IFS= read -r res; do
+    [[ -z "$res" ]] && continue
+    printf 'cluster\t%s\n' "$res" >> "$resources_file"
+  done < <(kubectl ${kctx[@]+"${kctx[@]}"} api-resources \
+             --verbs=list --namespaced=false \
+             -o name --no-headers 2>/dev/null || true)
+
+  # Dedup on (scope, resource): a kind listed under both scopes must
+  # be queried with each scope flag (cluster-scoped + `-A` errors out).
+  # Duplicate objects are removed by the final `sort -u` below.
+  local dedup_file
+  dedup_file=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-api-resources-dedup-XXXXXX")
+  register_temp_file "$dedup_file"
+  awk -F'\t' '!seen[$1 "\t" $2]++' "$resources_file" > "$dedup_file"
+
+  local total_kinds
+  total_kinds=$(wc -l < "$dedup_file" | tr -d ' ')
+  info "Querying $total_kinds API resource kinds for label matches…"
+
+  local scope resource matched_kinds=0 total_rows=0
+  while IFS=$'\t' read -r scope resource; do
+    [[ -z "$resource" ]] && continue
+
+    local skip=false skipped
+    for skipped in "${PURGE_SKIP_RESOURCES[@]}"; do
+      [[ "$resource" == "$skipped" ]] && { skip=true; break; }
+    done
+    $skip && continue
+
+    local -a get_cmd=(kubectl ${kctx[@]+"${kctx[@]}"} get "$resource"
+                      -l "$PURGE_LABEL_SELECTOR" -o json --ignore-not-found)
+    [[ "$scope" == "ns" ]] && get_cmd+=(-A)
+
+    local out err rc=0
+    err=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-get-err-XXXXXX")
+    register_temp_file "$err"
+    out=$("${get_cmd[@]}" 2>"$err") || rc=$?
+
+    if (( rc != 0 )); then
+      # RBAC or unknown-kind errors are warn-and-continue.
+      local first_err
+      first_err=$(head -n1 "$err" 2>/dev/null | tr -d '\n' | cut -c1-120)
+      warn "skip $resource: ${first_err:-kubectl error rc=$rc}"
+      log  "discovery skip: $resource rc=$rc msg=$first_err"
+      continue
+    fi
+    [[ -z "$out" ]] && continue
+
+    local rows
+    rows=$(printf '%s' "$out" | jq -r '
+      .items // []
+      | .[]
+      | "\(.apiVersion)\t\(.kind)\t\(.metadata.namespace // "-")\t\(.metadata.name)"
+    ' 2>/dev/null || true)
+
+    if [[ -n "$rows" ]]; then
+      printf '%s\n' "$rows" >> "$out_file"
+      local kind_count
+      kind_count=$(wc -l <<<"$rows" | tr -d ' ')
+      matched_kinds=$((matched_kinds + 1))
+      total_rows=$((total_rows + kind_count))
+      info "  + $resource: $kind_count match(es)"
+    fi
+  done < "$dedup_file"
+
+  # Dedup the final TSV (aliased short names cause duplicates).
+  if [[ -s "$out_file" ]]; then
+    local sorted
+    sorted=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-rows-sorted-XXXXXX")
+    register_temp_file "$sorted"
+    sort -u "$out_file" > "$sorted"
+    mv "$sorted" "$out_file"
+    total_rows=$(wc -l < "$out_file" | tr -d ' ')
+  fi
+
+  log "discovery complete: kinds_matched=$matched_kinds rows=$total_rows"
+  echo ""
+  ok "Discovery complete: $total_rows resource(s) across $matched_kinds kind(s)."
+  return 0
+}
+
+# Render the full per-resource list grouped by Group/Kind, plus a
+# compact subtotal table and grand total.
+purge_print_grouped_summary() {
+  local rows_file="$1"
+
+  print_section "RESOURCES TO BE DELETED"
+
+  if [[ ! -s "$rows_file" ]]; then
+    info "Nothing to delete."
+    return 0
+  fi
+
+  # Sort so identical group/kinds are contiguous.
+  local sorted
+  sorted=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-rows-display-XXXXXX")
+  register_temp_file "$sorted"
+  sort "$rows_file" > "$sorted"
+
+  # Detail pass: per-group subheader + namespace/name lines.
+  local apiv kind ns name prev_gk="" gk subtotal=0
+  local -a buffer=()
+
+  flush_group() {
+    if [[ -n "$prev_gk" ]]; then
+      printf "  %s── %s (%d) ──%s\n" "$CYAN" "$prev_gk" "$subtotal" "$NC"
+      local line
+      for line in "${buffer[@]}"; do
+        printf "      %s\n" "$line"
+      done
+      echo ""
+    fi
+  }
+
+  while IFS=$'\t' read -r apiv kind ns name; do
+    gk="${apiv}/${kind}"
+    if [[ "$gk" != "$prev_gk" ]]; then
+      flush_group
+      prev_gk="$gk"
+      subtotal=0
+      buffer=()
+    fi
+    if [[ "$ns" == "-" || -z "$ns" ]]; then
+      buffer+=("$name")
+    else
+      buffer+=("${ns}/${name}")
+    fi
+    subtotal=$((subtotal + 1))
+  done < "$sorted"
+  flush_group
+
+  # Compact per-kind subtotal table.
+  printf "  %sSummary by Group/Kind:%s\n" "$BOLD" "$NC"
+  printf "  %s%-50s %s%s\n" "$CYAN" "GROUP/KIND" "COUNT" "$NC"
+  printf "  %-50s %s\n" \
+    "──────────────────────────────────────────────────" "─────"
+
+  awk -F'\t' '
+    { gk = $1 "/" $2; count[gk]++ }
+    END {
+      for (gk in count) printf "%s\t%d\n", gk, count[gk]
+    }
+  ' "$sorted" \
+    | sort \
+    | while IFS=$'\t' read -r gk count; do
+        printf "  %-50s %s\n" "$gk" "$count"
+      done
+
+  echo ""
+  local total
+  total=$(wc -l < "$sorted" | tr -d ' ')
+  printf "  %sTotal:%s %d resource(s) across all groups\n" \
+    "$BOLD" "$NC" "$total"
+  echo ""
+}
+
+# Delete every discovered row by fully-qualified type. Sets the global
+# purge_delete_failed counter for the caller.
+purge_delete_resources() {
+  local rows_file="$1" dry_run="$2"
+  purge_delete_failed=0
+
+  print_section "STEP 4/5 — DELETING RESOURCES"
+
+  if [[ ! -s "$rows_file" ]]; then
+    info "Nothing to delete."
+    return 0
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    info "[DRY RUN] Skipping deletion — exiting before any destructive call."
+    return 0
+  fi
+
+  local summary
+  summary=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-delete-summary-XXXXXX")
+  register_temp_file "$summary"
+
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  local apiv kind ns name
+  while IFS=$'\t' read -r apiv kind ns name; do
+    [[ -z "$kind" || -z "$name" ]] && continue
+
+    # apiVersion "v1" → core (no group qualifier), else "<group>/<ver>".
+    local group target
+    if [[ "$apiv" == *"/"* ]]; then
+      group="${apiv%%/*}"
+      target="$(tolower "$kind").${group}/${name}"
+    else
+      target="$(tolower "$kind")/${name}"
+    fi
+
+    local -a del_cmd=(kubectl ${kctx[@]+"${kctx[@]}"} delete "$target"
+                      --ignore-not-found --wait=false)
+    [[ "$ns" != "-" && -n "$ns" ]] && del_cmd+=(-n "$ns")
+
+    local rc=0
+    if run_logged "kubectl-delete:$target" "${del_cmd[@]}" >/dev/null; then
+      purge_summary_row "$summary" OK \
+        "$kind" "$target" "$ns" "deleted" ""
+    else
+      rc=$?
+      purge_delete_failed=$((purge_delete_failed + 1))
+      purge_summary_row "$summary" FAILED \
+        "$kind" "$target" "$ns" "rc=$rc" "see log"
+      warn "delete failed: $target (ns=$ns rc=$rc)"
+    fi
+  done < "$rows_file"
+
+  print_purge_summary_table "PURGE SUMMARY" "$summary" "Deleted"
+}
+
+# Patch metadata.finalizers=[] on rows still present after the main
+# delete, then re-issue the delete. Requires extra confirmation.
+purge_force_clear_finalizers() {
+  local original_rows="$1"
+  print_section "FORCE PASS — CLEARING STUCK FINALIZERS"
+
+  warn "--force will patch metadata.finalizers=[] on every still-present"
+  warn "resource and re-issue the delete. This BYPASSES controller-driven"
+  warn "cleanup (e.g. finalizers that release cloud resources) — anything"
+  warn "those finalizers were responsible for may be leaked."
+
+  if ! purge_confirm "Proceed with finalizer clearing?"; then
+    warn "Force pass cancelled by user."
+    return 0
+  fi
+
+  local still_present
+  still_present=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-force-rows-XXXXXX")
+  register_temp_file "$still_present"
+
+  # Re-discover; the first delete may have reaped rows asynchronously.
+  # Use a force-pass-specific banner so the user isn't confused into
+  # thinking they're back at STEP 3 of the main flow.
+  purge_discover_resources "$still_present" \
+    "FORCE-PASS DISCOVERY (label: ${PURGE_LABEL_SELECTOR})" || true
+
+  if [[ ! -s "$still_present" ]]; then
+    ok "Nothing left to force-delete."
+    return 0
+  fi
+
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  local apiv kind ns name
+  while IFS=$'\t' read -r apiv kind ns name; do
+    [[ -z "$kind" || -z "$name" ]] && continue
+
+    local group target
+    if [[ "$apiv" == *"/"* ]]; then
+      group="${apiv%%/*}"
+      target="$(tolower "$kind").${group}/${name}"
+    else
+      target="$(tolower "$kind")/${name}"
+    fi
+
+    local -a ns_args=()
+    [[ "$ns" != "-" && -n "$ns" ]] && ns_args=(-n "$ns")
+
+    info "Clearing finalizers on $target (ns=$ns)…"
+    run_logged "kubectl-patch:$target" \
+      kubectl ${kctx[@]+"${kctx[@]}"} patch "$target" ${ns_args[@]+"${ns_args[@]}"} \
+        --type=merge -p '{"metadata":{"finalizers":[]}}' \
+        >/dev/null || warn "patch failed for $target — continuing"
+
+    run_logged "kubectl-delete-force:$target" \
+      kubectl ${kctx[@]+"${kctx[@]}"} delete "$target" ${ns_args[@]+"${ns_args[@]}"} \
+        --ignore-not-found --wait=false \
+        >/dev/null || warn "delete (force pass) failed for $target"
+  done < "$still_present"
+}
+
+# Delete the namespace, refusing protected ones and warning when foreign
+# (non-author-labeled) workloads still live in it. Honors dry_run.
+purge_delete_namespace() {
+  local ns="$1" dry_run="${2:-false}"
+  local dry_label=""
+  [[ "$dry_run" == "true" ]] && dry_label="[DRY RUN] "
+
+  print_section "OPTIONAL — DELETING NAMESPACE: $ns${dry_label:+ (DRY RUN)}"
+
+  local protected
+  for protected in "${PURGE_PROTECTED_NAMESPACES[@]}"; do
+    if [[ "$ns" == "$protected" ]]; then
+      error "Refusing to delete protected namespace: $ns"
+      return 1
+    fi
+  done
+
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  if ! kubectl ${kctx[@]+"${kctx[@]}"} get ns "$ns" >/dev/null 2>&1; then
+    info "Namespace $ns is already absent — skipping."
+    return 0
+  fi
+
+  # Best-effort foreign-workload count. `kubectl get all` only covers
+  # Pod/Deployment/ReplicaSet/StatefulSet/DaemonSet/Job/CronJob/RC/Service;
+  # ConfigMap/Secret/PVC/RBAC/CRD resources are NOT counted but ARE
+  # deleted with the namespace. The prompt below warns the user.
+  local foreign
+  foreign=$(kubectl ${kctx[@]+"${kctx[@]}"} get all -n "$ns" \
+              -o json 2>/dev/null \
+            | jq -r '
+                .items // []
+                | map(select((.metadata.labels // {})
+                    | (."app.kubernetes.io/author" // "") != "pan"))
+                | length
+              ' 2>/dev/null || echo 0)
+  foreign=${foreign:-0}
+
+  if (( foreign > 0 )); then
+    warn "Namespace $ns contains $foreign workload(s) WITHOUT the"
+    warn "author=pan label (Pod/Deployment/Service/Job/etc.; this count"
+    warn "does NOT include ConfigMap/Secret/PVC/RBAC/CRD resources)."
+    warn "Deleting the namespace will remove ALL contents regardless."
+    if ! purge_confirm "Delete namespace '$ns' AND its $foreign foreign workload(s)?"; then
+      info "Namespace deletion cancelled."
+      return 0
+    fi
+  fi
+
+  if [[ "$dry_run" == "true" ]]; then
+    info "[DRY RUN] Would delete namespace ${ns} (and all contents)."
+    log  "[DRY RUN] would delete namespace: $ns"
+    return 0
+  fi
+
+  info "Deleting namespace ${ns} …"
+  run_logged "kubectl-delete-ns:$ns" \
+    kubectl ${kctx[@]+"${kctx[@]}"} delete ns "$ns" --ignore-not-found --wait=false \
+    >/dev/null || warn "Namespace delete returned non-zero — check the log."
+}
+
+
+# Strip every annotation whose key starts with
+# PURGE_NODE_ANNOTATION_PREFIX from every Node. Always runs (no flag).
+# Uses one JSON Patch (RFC 6902) per node with N op=remove entries.
+purge_strip_node_annotations() {
+  local dry_run="$1"
+
+  print_section "STEP 5/5 — STRIPPING NODE ANNOTATIONS (prefix: ${PURGE_NODE_ANNOTATION_PREFIX})"
+
+  # Annotation keys are validated by k8s to [A-Za-z0-9._-] + at most one
+  # '/', so the RFC 6902 '/' → '~1' / '~' → '~0' escaping below fully
+  # covers the input — no JSON quote-injection vector.
+
+  local -a kctx; mapfile -t kctx < <(purge_kubectl_args)
+
+  local nodes_json
+  if ! nodes_json=$(kubectl ${kctx[@]+"${kctx[@]}"} get nodes -o json 2>/dev/null); then
+    warn "Could not list nodes (RBAC?). Skipping node-annotation strip."
+    log  "node-annotation strip skipped: kubectl get nodes failed"
+    return 0
+  fi
+
+  # TSV of "<node>\t<annotation-key>" rows, one per match.
+  local rows
+  rows=$(printf '%s' "$nodes_json" | jq -r --arg pfx "$PURGE_NODE_ANNOTATION_PREFIX" '
+    .items // []
+    | .[]
+    | . as $n
+    | ((.metadata.annotations // {}) | to_entries[])
+    | select(.key | startswith($pfx))
+    | "\($n.metadata.name)\t\(.key)"
+  ' 2>/dev/null || true)
+
+  if [[ -z "$rows" ]]; then
+    ok "No nodes carry annotations with prefix ${PURGE_NODE_ANNOTATION_PREFIX}."
+    return 0
+  fi
+
+  echo ""
+  printf "  %sAnnotations to remove:%s\n" "$BOLD" "$NC"
+  local node key prev_node=""
+  while IFS=$'\t' read -r node key; do
+    if [[ "$node" != "$prev_node" ]]; then
+      printf "    %s── node: %s ──%s\n" "$CYAN" "$node" "$NC"
+      prev_node="$node"
+    fi
+    printf "        - %s\n" "$key"
+  done <<<"$rows"
+  echo ""
+
+  if [[ "$dry_run" == "true" ]]; then
+    info "[DRY RUN] Skipping node-annotation strip."
+    return 0
+  fi
+
+  local summary
+  summary=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-node-annot-summary-XXXXXX")
+  register_temp_file "$summary"
+
+  # One patch per node (atomic, no per-key race).
+  local current_node="" patch_ops=""
+  local -i node_count=0 ann_count=0
+  flush_node() {
+    if [[ -n "$current_node" && -n "$patch_ops" ]]; then
+      local payload="[${patch_ops}]"
+      local rc=0
+      if run_logged "kubectl-patch-node:${current_node}" \
+           kubectl ${kctx[@]+"${kctx[@]}"} patch node "$current_node" \
+             --type=json -p "$payload" >/dev/null; then
+        printf 'OK|%s|(node annotations)|n/a|stripped|%d ann\n' \
+          "$current_node" "$ann_in_node" >> "$summary"
+      else
+        rc=$?
+        printf 'FAILED|%s|(node annotations)|n/a|rc=%d|see log\n' \
+          "$current_node" "$rc" >> "$summary"
+        warn "patch node $current_node failed (rc=$rc) — continuing"
+      fi
+    fi
+  }
+
+  local -i ann_in_node=0
+  while IFS=$'\t' read -r node key; do
+    if [[ "$node" != "$current_node" ]]; then
+      flush_node
+      current_node="$node"
+      patch_ops=""
+      ann_in_node=0
+      node_count=$((node_count + 1))
+    fi
+    # RFC 6902 path encoding: '/' -> '~1', '~' -> '~0'. The annotation
+    # key contains '/' so we MUST escape; otherwise the patch operates
+    # on a non-existent path and fails server-side.
+    local esc="${key//\~/~0}"
+    esc="${esc//\//~1}"
+    local op
+    op=$(printf '{"op":"remove","path":"/metadata/annotations/%s"}' "$esc")
+    if [[ -n "$patch_ops" ]]; then
+      patch_ops="${patch_ops},${op}"
+    else
+      patch_ops="$op"
+    fi
+    ann_in_node=$((ann_in_node + 1))
+    ann_count=$((ann_count + 1))
+  done <<<"$rows"
+  flush_node
+
+  print_purge_summary_table "NODE ANNOTATION SUMMARY" "$summary" "Patched"
+  log "Stripped $ann_count node annotation(s) from $node_count node(s)."
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Purge — top-level command
+# ─────────────────────────────────────────────────────────────────────────────
+# Globals populated by cmd_purge's flag parser; read by the helpers above.
+purge_namespace=""
+purge_kube_context=""
+purge_dry_run=false
+purge_assume_yes=false
+purge_force=false
+purge_drop_ns_flag=false
+purge_active_context=""
+purge_delete_failed=0
+
+cmd_purge() {
+  # ─── 1. Parse arguments
+  purge_namespace="$PURGE_DEFAULT_NAMESPACE"
+  purge_kube_context=""
+  purge_dry_run=false
+  purge_assume_yes=false
+  purge_force=false
+  purge_drop_ns_flag=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --namespace)
+        require_arg "--namespace" "${2:-}"
+        purge_namespace="$2"; shift 2 ;;
+      --kube-context)
+        require_arg "--kube-context" "${2:-}"
+        purge_kube_context="$2"; shift 2 ;;
+      --dry-run)          purge_dry_run=true;          shift ;;
+      -y|--yes)           purge_assume_yes=true;       shift ;;
+      --force)            purge_force=true;            shift ;;
+      --delete-namespace) purge_drop_ns_flag=true;     shift ;;
+      -h|--help)          purge_usage;                 exit 0 ;;
+      *)
+        error "Unknown flag for ${PROGRAM_NAME} purge: $1"
+        echo ""; purge_usage; exit 64 ;;
+    esac
+  done
+
+  # ─── 2. Prerequisites + audit log
+  check_prerequisites helm kubectl jq
+  init_log_file
+  log "kcli purge starting (namespace=$purge_namespace context=${purge_kube_context:-<current>} dry_run=$purge_dry_run force=$purge_force delete_namespace=$purge_drop_ns_flag)"
+
+  # ─── 3. Target banner + confirmation (always shown, even with --yes)
+  purge_print_target_banner
+
+  local confirm_prompt="Proceed with purge against the cluster shown above?"
+  [[ "$purge_dry_run" == "true" ]] && \
+    confirm_prompt="Proceed with DRY RUN preview against the cluster shown above?"
+  if ! purge_confirm "$confirm_prompt"; then
+    warn "Aborted by user before any change was made."
+    exit 130
+  fi
+
+  # ─── 4. Helm uninstall (best-effort, never aborts)
+  helm_uninstall_all_releases "$purge_namespace" "$purge_dry_run"
+
+  # ─── 5. Discover labeled resources across ALL api groups
+  local rows_file
+  rows_file=$(mktemp "${TMP_ROOT}/${PROGRAM_NAME}-purge-rows-XXXXXX")
+  register_temp_file "$rows_file"
+  purge_discover_resources "$rows_file"
+
+  # ─── 6. Show grouped summary + confirm delete
+  purge_print_grouped_summary "$rows_file"
+
+  if [[ ! -s "$rows_file" ]]; then
+    ok "Cluster already clean for label ${PURGE_LABEL_SELECTOR}."
+    # Node annotations are outside the label sweep; strip them anyway.
+    purge_strip_node_annotations "$purge_dry_run"
+    if [[ "$purge_drop_ns_flag" == "true" ]]; then
+      purge_delete_namespace "$purge_namespace" "$purge_dry_run" || true
+    fi
+    [[ "$purge_dry_run" == "true" ]] && \
+      info "[DRY RUN] Preview complete — no changes were made."
+    exit 0
+  fi
+
+  if [[ "$purge_dry_run" == "true" ]]; then
+    # Match the empty-rows branch: dry-run previews EVERY mutating phase.
+    purge_strip_node_annotations "$purge_dry_run"
+    if [[ "$purge_drop_ns_flag" == "true" ]]; then
+      purge_delete_namespace "$purge_namespace" "$purge_dry_run" || true
+    fi
+    info "[DRY RUN] Preview complete — no changes were made."
+    info "[DRY RUN] Re-run without --dry-run to actually delete."
+    exit 0
+  fi
+
+  if ! purge_confirm "Delete ALL of the above resources?"; then
+    warn "Aborted by user. No resources were deleted."
+    exit 130
+  fi
+
+  # ─── 7. Delete
+  purge_delete_resources "$rows_file" "$purge_dry_run"
+
+  # ─── 8. Strip paloaltonetworks.com/* annotations from every Node
+  purge_strip_node_annotations "$purge_dry_run"
+
+  # ─── 9. Optional --force pass for stuck finalizers
+  if [[ "$purge_force" == "true" ]]; then
+    purge_force_clear_finalizers "$rows_file"
+  fi
+
+  # ─── 10. Optional --delete-namespace
+  if [[ "$purge_drop_ns_flag" == "true" ]]; then
+    purge_delete_namespace "$purge_namespace" "$purge_dry_run" || true
+  fi
+
+  echo ""
+  if (( purge_delete_failed > 0 )); then
+    warn "Purge completed with $purge_delete_failed failed deletion(s)."
+    warn "Re-run with --force to attempt finalizer clearing, or inspect the log:"
+    warn "  $LOG_FILE"
+    exit 1
+  fi
+  ok "Purge complete."
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main entry — subcommand dispatcher
 # ─────────────────────────────────────────────────────────────────────────────
 # Accepted invocations:
@@ -1717,6 +2759,7 @@ cmd_mirror() {
 #   konnector version          → print version
 #   konnector -v | --version   → print version
 #   konnector mirror [flags…]  → run the mirror flow
+#   konnector purge  [flags…]  → "real delete" cleanup of a corrupted install
 main() {
   if [[ $# -eq 0 ]]; then
     usage
@@ -1734,6 +2777,7 @@ main() {
 
   case "$command" in
     mirror)               cmd_mirror  "$@" ;;
+    purge)                cmd_purge   "$@" ;;
     version|-v|--version) cmd_version      ;;
     help|-h|--help)       cmd_help         ;;
     *)
